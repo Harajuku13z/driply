@@ -31,7 +31,9 @@ class VerifyEmailPageTest extends TestCase
             ->assertHeaderContains('content-type', 'text/html')
             ->assertSee('Driply', false)
             ->assertSee('E-mail confirmé', false)
-            ->assertSee($user->name, false);
+            ->assertSee($user->name, false)
+            ->assertSee('Ouvrir l’application', false)
+            ->assertSee('driply://email-verified', false);
     }
 
     public function test_api_client_gets_json_when_accept_json(): void

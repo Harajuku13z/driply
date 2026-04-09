@@ -109,6 +109,30 @@
         a.hint-link:hover {
             text-decoration: underline;
         }
+        .btn-open-app {
+            display: block;
+            width: 100%;
+            margin: 1.25rem 0 0;
+            padding: 0.9rem 1.25rem;
+            text-align: center;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #ffffff !important;
+            text-decoration: none !important;
+            border-radius: 0.75rem;
+            background-color: #7b61ff;
+            background-image: linear-gradient(90deg, #7b61ff 0%, #00c2ff 100%);
+            box-shadow: 0 8px 24px rgba(123, 97, 255, 0.35);
+            border: none;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn-open-app:hover {
+            filter: brightness(1.06);
+        }
+        .btn-open-app:active {
+            filter: brightness(0.95);
+        }
     </style>
 </head>
 <body>

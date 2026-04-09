@@ -23,6 +23,11 @@ return [
     'legacy_api_key' => env('DRIPLY_LEGACY_API_KEY', ''),
 
     /*
+    | Page web « e-mail vérifié » : bouton qui ouvre l’app iOS (CFBundleURLSchemes = driply).
+    */
+    'ios_open_app_url' => env('DRIPLY_IOS_OPEN_APP_URL', 'driply://email-verified'),
+
+    /*
     | Import médias réseaux : backend custom POST /media/fetch, ou FastSaverAPI
     | (FASTSERVER_URL hôte fastsaverapi.com → GET /get-info + token en query).
     */
