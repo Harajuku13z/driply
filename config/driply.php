@@ -17,6 +17,12 @@ return [
         'model' => env('OPENAI_MODEL', 'gpt-4o'),
     ],
     /*
+    | App iOS (Hostinger legacy) : upload.php + api/sync_media.php avec en-tête X-Driply-Key.
+    | Laisser vide en local pour autoriser l’upload sans clé ; définir en production.
+    */
+    'legacy_api_key' => env('DRIPLY_LEGACY_API_KEY', ''),
+
+    /*
     | Import médias réseaux : backend custom POST /media/fetch, ou FastSaverAPI
     | (FASTSERVER_URL hôte fastsaverapi.com → GET /get-info + token en query).
     */
