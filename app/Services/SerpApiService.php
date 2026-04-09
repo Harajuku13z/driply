@@ -134,11 +134,11 @@ class SerpApiService
     }
 
     /**
-     * Recherche Google Shopping (SerpAPI) pour compléter les prix quand Lens n’en fournit pas.
+     * Recherche [Google Shopping API (SerpAPI)](https://serpapi.com/google-shopping-api) : prix, liens, miniatures.
      *
-     * @return array<int, array{title: string, link: string, source: string, price: ?string, extracted_price: float|int|null, currency: ?string}>
+     * @return array<int, array{title: string, link: string, source: string, thumbnail_url: string, price: ?string, extracted_price: float|int|null, currency: ?string}>
      */
-    public function googleShoppingSearch(string $query, int $limit = 8): array
+    public function googleShoppingSearch(string $query, int $limit = 8, ?string $gl = null, ?string $hl = null): array
     {
         $this->assertKey();
         $q = trim($query);
@@ -146,15 +146,23 @@ class SerpApiService
             return [];
         }
 
+        $params = [
+            'engine' => 'google_shopping',
+            'q' => $q,
+            'api_key' => $this->apiKey,
+            'num' => min(max($limit, 1), 40),
+        ];
+        if ($gl !== null && $gl !== '') {
+            $params['gl'] = $gl;
+        }
+        if ($hl !== null && $hl !== '') {
+            $params['hl'] = $hl;
+        }
+
         try {
             $response = Http::timeout(45)
                 ->acceptJson()
-                ->get($this->baseUrl.'/search', [
-                    'engine' => 'google_shopping',
-                    'q' => $q,
-                    'api_key' => $this->apiKey,
-                    'num' => min(max($limit, 1), 40),
-                ])
+                ->get($this->baseUrl.'/search', $params)
                 ->throw();
         } catch (RequestException $e) {
             throw new ExternalServiceException('SerpAPI Google Shopping failed: '.$e->getMessage(), 0, $e);
@@ -173,38 +181,54 @@ class SerpApiService
             if (! is_array($row)) {
                 continue;
             }
-            $title = (string) ($row['title'] ?? '');
-            $link = (string) ($row['link'] ?? $row['product_link'] ?? '');
-            if ($title === '' && $link === '') {
+            $parsed = $this->parseShoppingResultRow($row);
+            if ($parsed === null) {
                 continue;
             }
-            $source = (string) ($row['source'] ?? $row['store'] ?? '');
-            $priceStr = null;
-            $extracted = null;
-            $currency = null;
-            if (isset($row['price']) && is_array($row['price'])) {
-                $priceStr = isset($row['price']['value']) ? (string) $row['price']['value'] : null;
-                $extracted = $row['price']['extracted_value'] ?? null;
-                $currency = isset($row['price']['currency']) ? (string) $row['price']['currency'] : null;
-            } elseif (isset($row['price'])) {
-                $priceStr = is_scalar($row['price']) ? (string) $row['price'] : null;
-            }
-            $extracted = is_numeric($extracted) ? $extracted + 0 : (isset($row['extracted_price']) && is_numeric($row['extracted_price']) ? $row['extracted_price'] + 0 : null);
-
-            $out[] = [
-                'title' => $title,
-                'link' => $link,
-                'source' => $source,
-                'price' => $priceStr,
-                'extracted_price' => $extracted,
-                'currency' => $currency,
-            ];
+            $out[] = $parsed;
             if (count($out) >= $limit) {
                 break;
             }
         }
 
         return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array{title: string, link: string, source: string, thumbnail_url: string, price: ?string, extracted_price: float|int|null, currency: ?string}|null
+     */
+    private function parseShoppingResultRow(array $row): ?array
+    {
+        $title = (string) ($row['title'] ?? '');
+        $link = (string) ($row['link'] ?? $row['product_link'] ?? '');
+        if ($title === '' && $link === '') {
+            return null;
+        }
+        $source = (string) ($row['source'] ?? $row['store'] ?? '');
+        $thumbnailUrl = (string) ($row['thumbnail'] ?? $row['serpapi_thumbnail'] ?? '');
+
+        $priceStr = null;
+        $extracted = null;
+        $currency = null;
+        if (isset($row['price']) && is_array($row['price'])) {
+            $priceStr = isset($row['price']['value']) ? (string) $row['price']['value'] : null;
+            $extracted = $row['price']['extracted_value'] ?? null;
+            $currency = isset($row['price']['currency']) ? (string) $row['price']['currency'] : null;
+        } elseif (isset($row['price'])) {
+            $priceStr = is_scalar($row['price']) ? (string) $row['price'] : null;
+        }
+        $extracted = is_numeric($extracted) ? $extracted + 0 : (isset($row['extracted_price']) && is_numeric($row['extracted_price']) ? $row['extracted_price'] + 0 : null);
+
+        return [
+            'title' => $title,
+            'link' => $link,
+            'source' => $source,
+            'thumbnail_url' => $thumbnailUrl,
+            'price' => $priceStr,
+            'extracted_price' => $extracted,
+            'currency' => $currency,
+        ];
     }
 
     /**

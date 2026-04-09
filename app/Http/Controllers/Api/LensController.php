@@ -13,6 +13,7 @@ use App\Models\LensResult;
 use App\Models\Outfit;
 use App\Models\User;
 use App\Services\GoogleLensService;
+use App\Services\LensShoppingEnrichmentService;
 use App\Services\PriceAnalysisService;
 use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\JsonResponse;
@@ -27,7 +28,7 @@ class LensController extends Controller
 {
     use ApiResponses;
 
-    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, PriceAnalysisService $prices): JsonResponse
+    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, LensShoppingEnrichmentService $lensShopping, PriceAnalysisService $prices): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -52,7 +53,9 @@ class LensController extends Controller
             }
 
             $raw = $lens->analyzeImage($inputPath);
-            $products = $lens->extractTopVisualMatches($raw, 3);
+            $topN = (int) config('driply.lens.top_visual_matches', 4);
+            $products = $lens->extractTopVisualMatches($raw, $topN);
+            $enriched = $lensShopping->enrich($products);
 
             $filteredLensResults = array_values(array_map(function (array $p) {
                 return [
@@ -63,10 +66,21 @@ class LensController extends Controller
                     'product_url' => (string) ($p['product_url'] ?? ''),
                     'price_found' => $p['price_found'] ?? null,
                     'currency_found' => $p['currency_found'] ?? null,
+                    'shopping_offers' => array_values(array_map(static function (array $o): array {
+                        return [
+                            'title' => (string) ($o['title'] ?? ''),
+                            'link' => (string) ($o['link'] ?? ''),
+                            'source' => (string) ($o['source'] ?? ''),
+                            'thumbnail_url' => (string) ($o['thumbnail_url'] ?? ''),
+                            'price' => $o['price'] ?? null,
+                            'extracted_price' => $o['extracted_price'] ?? null,
+                            'currency' => $o['currency'] ?? null,
+                        ];
+                    }, $p['shopping_offers'] ?? [])),
                 ];
-            }, $products));
+            }, $enriched));
 
-            $analysis = $prices->analyzeFromLensResults($products, $currency);
+            $analysis = $prices->analyzeFromLensResults($enriched, $currency);
 
             $record = LensResult::query()->create([
                 'user_id' => $user->id,

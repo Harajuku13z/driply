@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Services\GoogleLensService;
+use App\Services\LensShoppingEnrichmentService;
 use App\Services\PriceAnalysisService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -31,6 +32,10 @@ class LensAnalyzeResponseTest extends TestCase
         $this->mock(GoogleLensService::class, function ($mock): void {
             $mock->shouldReceive('analyzeImage')->once()->andReturn(['visual_matches' => []]);
             $mock->shouldReceive('extractTopVisualMatches')->once()->andReturn([]);
+        });
+
+        $this->mock(LensShoppingEnrichmentService::class, function ($mock): void {
+            $mock->shouldReceive('enrich')->once()->andReturn([]);
         });
 
         $this->mock(PriceAnalysisService::class, function ($mock): void {
@@ -68,7 +73,8 @@ class LensAnalyzeResponseTest extends TestCase
                         'estimated_price_mid',
                     ],
                 ],
-            ]);
+            ])
+            ->assertJsonPath('data.lens_results', []);
 
         $id = $response->json('data.lens_result_id');
         $this->assertIsString($id);

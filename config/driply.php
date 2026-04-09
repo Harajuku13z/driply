@@ -16,6 +16,17 @@ return [
         'key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o'),
     ],
+
+    /*
+    | Analyse Lens : nombre de correspondances visuelles, puis une recherche Google Shopping
+    | (SerpAPI) par titre pour récupérer prix + miniatures. gl/hl = pays / langue Shopping.
+    */
+    'lens' => [
+        'top_visual_matches' => max(1, min(8, (int) env('DRIPLY_LENS_TOP_MATCHES', 4))),
+        'shopping_offers_per_match' => max(1, min(20, (int) env('DRIPLY_LENS_SHOPPING_OFFERS', 6))),
+        'shopping_gl' => env('DRIPLY_SERPAPI_SHOPPING_GL', 'fr'),
+        'shopping_hl' => env('DRIPLY_SERPAPI_SHOPPING_HL', 'fr'),
+    ],
     /*
     | App iOS (Hostinger legacy) : upload.php + api/sync_media.php avec en-tête X-Driply-Key.
     | Laisser vide en local pour autoriser l’upload sans clé ; définir en production.

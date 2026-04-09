@@ -7,15 +7,10 @@ namespace App\Services;
 use App\Exceptions\ExternalServiceException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class PriceAnalysisService
 {
-    public function __construct(
-        private readonly SerpApiService $serpApi,
-    ) {}
-
     /**
      * @param  array<int, array<string, mixed>>  $lensProducts
      * @return array<string, mixed>
@@ -28,24 +23,23 @@ class PriceAnalysisService
         }
 
         $model = (string) config('driply.openai.model', 'gpt-4o');
-        $shoppingHints = $this->maybeShoppingHints($lensProducts);
         $envelope = [
-            'lens_top_visual_matches' => $this->stripInternalLensFields($lensProducts),
-            'google_shopping_hints' => $shoppingHints,
+            'lens_rows' => $this->stripInternalLensFields($lensProducts),
         ];
         $listJson = json_encode($envelope, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 
         $prompt = <<<PROMPT
 Tu es un expert en mode et en valorisation de vêtements et accessoires.
 
-Voici le JSON des entrées (lens_top_visual_matches = top 3 correspondances visuelles avec product_url et image_url ; google_shopping_hints = repli Google Shopping si Lens n’a pas de prix) :
+Voici le JSON : "lens_rows" = pour chaque correspondance visuelle Google Lens (jusqu’à 4), les champs Lens (titre, source, liens, image, price_found si Lens l’a fourni) et "shopping_offers" = offres Google Shopping (SerpAPI) avec price, extracted_price, currency, titre marchand, lien — utilise les miniatures uniquement si tu en parles dans l’explication (les URLs sont là pour contexte marchand).
 
 {$listJson}
 
 Consignes :
-1) Priorité aux prix explicites (price_found sur Lens, extracted_price / price dans google_shopping_hints). Tu n’as pas accès aux pages web : base-toi sur ces champs et sur titres / marques (source).
-2) Si aucun prix fiable n’apparaît, estime une fourchette réaliste à partir du type de produit et de la marque, et indique confidence "low".
-3) Donne les estimations dans la devise "{$currency}" (convertis mentalement si les hints sont en USD ou autre).
+1) Priorité aux prix : d’abord extracted_price / price dans shopping_offers, puis price_found sur Lens. Tu n’as pas accès aux pages web.
+2) Si peu ou pas de prix numériques, estime une fourchette à partir des titres / marques et indique confidence "low".
+3) Donne les estimations dans la devise "{$currency}" (convertis mentalement si les montants sont dans une autre devise).
+4) Pour sources_analyzed, compte les entrées lens + le nombre total d’offres shopping utilisées pour raisonner.
 
 Réponds UNIQUEMENT avec un JSON valide (sans texte avant ni après) avec cette structure exacte :
 {
@@ -136,6 +130,22 @@ PROMPT;
     private function stripInternalLensFields(array $lensProducts): array
     {
         return array_values(array_map(function (array $p): array {
+            $offers = [];
+            foreach ($p['shopping_offers'] ?? [] as $o) {
+                if (! is_array($o)) {
+                    continue;
+                }
+                $offers[] = [
+                    'title' => (string) ($o['title'] ?? ''),
+                    'link' => (string) ($o['link'] ?? ''),
+                    'source' => (string) ($o['source'] ?? ''),
+                    'thumbnail_url' => (string) ($o['thumbnail_url'] ?? ''),
+                    'price' => $o['price'] ?? null,
+                    'extracted_price' => $o['extracted_price'] ?? null,
+                    'currency' => $o['currency'] ?? null,
+                ];
+            }
+
             return [
                 'title' => (string) ($p['title'] ?? ''),
                 'source' => (string) ($p['source'] ?? ''),
@@ -144,38 +154,8 @@ PROMPT;
                 'thumbnail_url' => (string) ($p['thumbnail_url'] ?? ''),
                 'price_found' => $p['price_found'] ?? null,
                 'currency_found' => $p['currency_found'] ?? null,
+                'shopping_offers' => $offers,
             ];
         }, $lensProducts));
-    }
-
-    /**
-     * Si aucune des correspondances Lens n’a de prix, on interroge Google Shopping comme repli.
-     *
-     * @param  array<int, array<string, mixed>>  $lensProducts
-     * @return array<int, array<string, mixed>>
-     */
-    private function maybeShoppingHints(array $lensProducts): array
-    {
-        foreach ($lensProducts as $p) {
-            if (! empty($p['price_found'])) {
-                return [];
-            }
-        }
-
-        $title = (string) ($lensProducts[0]['title'] ?? '');
-        if ($title === '') {
-            return [];
-        }
-
-        try {
-            return $this->serpApi->googleShoppingSearch($title, 8);
-        } catch (Throwable $e) {
-            Log::warning('driply.google_shopping_fallback_failed', [
-                'message' => $e->getMessage(),
-                'query' => $title,
-            ]);
-
-            return [];
-        }
     }
 }
