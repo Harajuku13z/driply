@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\LensResult;
+use App\Support\LensPublicImageUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 /** @mixin LensResult */
 class LensResultResource extends JsonResource
@@ -17,9 +17,9 @@ class LensResultResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $input = $this->input_image_url;
+        $input = (string) ($this->input_image_url ?? '');
         if ($input !== '' && ! str_starts_with($input, 'http://') && ! str_starts_with($input, 'https://')) {
-            $input = Storage::disk('public')->url($input);
+            $input = LensPublicImageUrl::absoluteFromPublicDiskPath($input);
         }
 
         $products = $this->lens_products ?? [];

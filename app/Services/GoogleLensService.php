@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\LensPublicImageUrl;
 use App\Support\UnwrapGoogleUrl;
-use Illuminate\Support\Facades\Storage;
 
 class GoogleLensService
 {
@@ -168,28 +168,7 @@ class GoogleLensService
 
     private function toPublicUrl(string $imagePathOrUrl): string
     {
-        if (str_starts_with($imagePathOrUrl, 'http://') || str_starts_with($imagePathOrUrl, 'https://')) {
-            return $imagePathOrUrl;
-        }
-
-        $relative = ltrim($imagePathOrUrl, '/');
-
-        $useRoute = (bool) config('driply.lens.use_public_file_route', true);
-        if ($useRoute && str_starts_with($relative, 'lens/')) {
-            return url('/driply-public/'.$relative);
-        }
-
-        $base = rtrim((string) config('driply.lens.public_storage_base_url', ''), '/');
-        if ($base !== '') {
-            return $base.'/storage/'.$relative;
-        }
-
-        $diskUrl = Storage::disk('public')->url($relative);
-        if (str_starts_with($diskUrl, 'http://') || str_starts_with($diskUrl, 'https://')) {
-            return $diskUrl;
-        }
-
-        return url($diskUrl);
+        return LensPublicImageUrl::absoluteFromPublicDiskPath($imagePathOrUrl);
     }
 
     /**
