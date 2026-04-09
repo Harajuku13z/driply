@@ -11,6 +11,8 @@
 
 Documentation pour l’application mobile : [docs/GUIDE_API_IOS.md](docs/GUIDE_API_IOS.md).
 
+**PHP** : le projet cible **PHP 8.2+** (compatible hébergements Hostinger en 8.2). La stack est **Laravel 12** (Laravel 13 impose PHP 8.3).
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

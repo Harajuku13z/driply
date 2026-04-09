@@ -10,24 +10,12 @@ use Illuminate\Auth\MustVerifyEmail as MustVerifyEmailTrait;
 use Illuminate\Auth\Passwords\CanResetPassword;
 use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable([
-    'name',
-    'email',
-    'password',
-    'avatar',
-    'plan',
-    'currency_preference',
-    'outfits_count',
-])]
-#[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements CanResetPasswordContract, MustVerifyEmailContract
 {
     /** @use HasFactory<UserFactory> */
@@ -36,6 +24,27 @@ class User extends Authenticatable implements CanResetPasswordContract, MustVeri
     use HasFactory;
     use MustVerifyEmailTrait;
     use Notifiable;
+
+    /**
+     * @var list<string>
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'avatar',
+        'plan',
+        'currency_preference',
+        'outfits_count',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
 
     /**
      * @return array<string, string>
