@@ -1,0 +1,8 @@
+# Hostinger / hébergement : racine du domaine = dossier du projet (parent de `public`).
+# Sans ce fichier, toute l’URL tombe en 404 car seul `public/index.php` doit traiter les routes.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Envoie tout le trafic vers le dossier public/ (index.php + .htaccess Laravel)
+    RewriteRule ^(.*)$ public/$1 [L,QSA]
+</IfModule>

@@ -2,7 +2,18 @@
 
 ## Cause habituelle
 
-Le domaine pointe vers **`public_html`** alors que Laravel doit servir le dossier **`public`** (celui qui contient `index.php` et `.htaccess`).
+Le domaine pointe vers **`public_html`** (racine du site) alors que Laravel ne répond que depuis le dossier **`public/`**. Sans réécriture, `/api-verif` cherche un fichier inexistant → **404 Hostinger**.
+
+## Solution 0 — Fichier `.htaccess` à la racine du projet (souvent suffisant)
+
+Le dépôt contient un **`.htaccess` à la racine** (à côté de `app/`, `public/`, `artisan`).  
+Si tu as déployé **tout le projet dans `public_html`**, ce fichier doit être bien **dans `public_html`** (pas seulement dans un sous-dossier oublié).
+
+1. **`git pull`** (ou upload) pour récupérer ce `.htaccess` à la racine.
+2. Vérifie dans le **Gestionnaire de fichiers** : `public_html/.htaccess` existe.
+3. Vide le **cache Hostinger** si proposé, réessaie `https://driplyapp.fr/api-verif`.
+
+Si ton projet est dans un sous-dossier (`public_html/driply/`), mets ce `.htaccess` dans **`public_html/driply/`** et configure la **racine du domaine** vers ce dossier (ou vers `driply/public` avec la solution 1).
 
 ## Solution 1 — Document Root (recommandé)
 
