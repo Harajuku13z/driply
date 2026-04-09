@@ -30,7 +30,7 @@ class LensAnalyzeResponseTest extends TestCase
 
         $this->mock(GoogleLensService::class, function ($mock): void {
             $mock->shouldReceive('analyzeImage')->once()->andReturn(['visual_matches' => []]);
-            $mock->shouldReceive('extractProducts')->once()->andReturn([]);
+            $mock->shouldReceive('extractTopVisualMatches')->once()->andReturn([]);
         });
 
         $this->mock(PriceAnalysisService::class, function ($mock): void {

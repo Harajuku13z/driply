@@ -11,11 +11,13 @@ use App\Http\Requests\Lens\LensAnalyzeRequest;
 use App\Http\Resources\LensResultResource;
 use App\Models\LensResult;
 use App\Models\Outfit;
+use App\Models\User;
 use App\Services\GoogleLensService;
 use App\Services\PriceAnalysisService;
+use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -27,7 +29,7 @@ class LensController extends Controller
 
     public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, PriceAnalysisService $prices): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $currency = $user->currency_preference;
 
@@ -38,7 +40,7 @@ class LensController extends Controller
                 Storage::disk('public')->put($stored, (string) file_get_contents($file->getRealPath()));
                 $inputPath = $stored;
             } else {
-                $imageUrl = (string) $request->validated('image_url');
+                $imageUrl = UnwrapGoogleUrl::unwrap((string) $request->validated('image_url'));
                 $binary = Http::timeout(60)
                     ->withHeaders(['User-Agent' => 'Driply/1.0'])
                     ->get($imageUrl)
@@ -50,13 +52,14 @@ class LensController extends Controller
             }
 
             $raw = $lens->analyzeImage($inputPath);
-            $products = $lens->extractProducts($raw);
+            $products = $lens->extractTopVisualMatches($raw, 3);
 
             $filteredLensResults = array_values(array_map(function (array $p) {
                 return [
                     'title' => (string) ($p['title'] ?? ''),
                     'source' => (string) ($p['source'] ?? ''),
                     'thumbnail_url' => (string) ($p['thumbnail_url'] ?? ''),
+                    'image_url' => (string) ($p['image_url'] ?? ''),
                     'product_url' => (string) ($p['product_url'] ?? ''),
                     'price_found' => $p['price_found'] ?? null,
                     'currency_found' => $p['currency_found'] ?? null,

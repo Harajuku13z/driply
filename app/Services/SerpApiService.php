@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Exceptions\ExternalServiceException;
+use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -133,6 +134,80 @@ class SerpApiService
     }
 
     /**
+     * Recherche Google Shopping (SerpAPI) pour compléter les prix quand Lens n’en fournit pas.
+     *
+     * @return array<int, array{title: string, link: string, source: string, price: ?string, extracted_price: float|int|null, currency: ?string}>
+     */
+    public function googleShoppingSearch(string $query, int $limit = 8): array
+    {
+        $this->assertKey();
+        $q = trim($query);
+        if ($q === '') {
+            return [];
+        }
+
+        try {
+            $response = Http::timeout(45)
+                ->acceptJson()
+                ->get($this->baseUrl.'/search', [
+                    'engine' => 'google_shopping',
+                    'q' => $q,
+                    'api_key' => $this->apiKey,
+                    'num' => min(max($limit, 1), 40),
+                ])
+                ->throw();
+        } catch (RequestException $e) {
+            throw new ExternalServiceException('SerpAPI Google Shopping failed: '.$e->getMessage(), 0, $e);
+        } catch (Throwable $e) {
+            throw new ExternalServiceException('SerpAPI Shopping unavailable: '.$e->getMessage(), 0, $e);
+        }
+
+        $payload = $response->json();
+        $rows = is_array($payload) ? ($payload['shopping_results'] ?? []) : [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $title = (string) ($row['title'] ?? '');
+            $link = (string) ($row['link'] ?? $row['product_link'] ?? '');
+            if ($title === '' && $link === '') {
+                continue;
+            }
+            $source = (string) ($row['source'] ?? $row['store'] ?? '');
+            $priceStr = null;
+            $extracted = null;
+            $currency = null;
+            if (isset($row['price']) && is_array($row['price'])) {
+                $priceStr = isset($row['price']['value']) ? (string) $row['price']['value'] : null;
+                $extracted = $row['price']['extracted_value'] ?? null;
+                $currency = isset($row['price']['currency']) ? (string) $row['price']['currency'] : null;
+            } elseif (isset($row['price'])) {
+                $priceStr = is_scalar($row['price']) ? (string) $row['price'] : null;
+            }
+            $extracted = is_numeric($extracted) ? $extracted + 0 : (isset($row['extracted_price']) && is_numeric($row['extracted_price']) ? $row['extracted_price'] + 0 : null);
+
+            $out[] = [
+                'title' => $title,
+                'link' => $link,
+                'source' => $source,
+                'price' => $priceStr,
+                'extracted_price' => $extracted,
+                'currency' => $currency,
+            ];
+            if (count($out) >= $limit) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @throws ExternalServiceException
      */
     private function assertKey(): void
@@ -147,7 +222,7 @@ class SerpApiService
      */
     private function sanitizeRemoteUrl(string $url): string
     {
-        $trimmed = trim($url);
+        $trimmed = UnwrapGoogleUrl::unwrap(trim($url));
         if (! filter_var($trimmed, FILTER_VALIDATE_URL)) {
             throw new ExternalServiceException('Invalid remote URL');
         }
