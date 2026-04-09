@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -139,8 +140,17 @@ class ApiVerifController extends Controller
             $openai !== '' ? 'renseignée' : 'OPENAI_API_KEY vide — Lens sans estimation GPT');
 
         $fastUrl = (string) config('driply.fastserver.url', '');
-        $out[] = $this->check('fastserver', 'Fast Server (import réseaux)', $fastUrl !== '' ? 'ok' : 'warn',
-            $fastUrl !== '' ? 'URL renseignée' : 'FASTSERVER_URL vide');
+        $fastKey = (string) config('driply.fastserver.key', '');
+        $fastHost = Str::lower((string) parse_url(rtrim($fastUrl, '/'), PHP_URL_HOST));
+        $isFastSaver = $fastHost !== '' && str_contains($fastHost, 'fastsaverapi.com');
+        if ($fastUrl === '') {
+            $out[] = $this->check('fastserver', 'Fast Server / FastSaverAPI (import réseaux)', 'warn', 'FASTSERVER_URL vide');
+        } elseif ($isFastSaver && $fastKey === '') {
+            $out[] = $this->check('fastserver', 'Fast Server / FastSaverAPI (import réseaux)', 'warn', 'FastSaverAPI : FASTSERVER_KEY requis');
+        } else {
+            $out[] = $this->check('fastserver', 'Fast Server / FastSaverAPI (import réseaux)', 'ok',
+                $isFastSaver ? 'FastSaverAPI (URL + token)' : 'URL renseignée');
+        }
 
         return $out;
     }

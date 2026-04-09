@@ -1,0 +1,673 @@
+openapi: 3.0.3
+info:
+  title: Driply API
+  description: |
+    API REST Driply (Laravel + Sanctum). Authentification Bearer sur les routes protégées.
+    Enveloppe JSON typique : `{ "success", "data", "message", "meta" }`.
+  version: 1.0.0
+  contact:
+    name: Driply
+servers:
+  - url: /api
+    description: Instance courante (même origine que ce fichier)
+tags:
+  - name: Auth
+  - name: User
+  - name: Outfits
+  - name: Search
+  - name: Lens
+  - name: Media
+  - name: Scan
+  - name: Tags
+  - name: Dashboard
+  - name: Diagnostics
+
+paths:
+  /verif:
+    get:
+      tags: [Diagnostics]
+      summary: Diagnostic serveur (équivalent web `/api-verif`)
+      responses:
+        '200':
+          description: HTML ou JSON selon Accept / query
+
+  /register:
+    post:
+      tags: [Auth]
+      summary: Inscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Compte créé + token Sanctum
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSuccess' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /login:
+    post:
+      tags: [Auth]
+      summary: Connexion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: OK + token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSuccess' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Déconnexion (révoque le token courant)
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /forgot-password:
+    post:
+      tags: [Auth]
+      summary: Demande de lien reset mot de passe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Toujours succès métier (pas d'énumération e-mail)
+
+  /reset-password:
+    post:
+      tags: [Auth]
+      summary: Réinitialiser le mot de passe (token + e-mail)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /email/verify/{id}/{hash}:
+    get:
+      tags: [Auth]
+      summary: Vérification e-mail (URL signée Laravel)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: hash
+          in: path
+          required: true
+          schema: { type: string }
+        - name: expires
+          in: query
+          schema: { type: string }
+        - name: signature
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: E-mail vérifié
+        '403':
+          description: Lien invalide ou expiré
+
+  /me:
+    get:
+      tags: [User]
+      summary: Profil utilisateur courant
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [User]
+      summary: Mettre à jour le profil
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /me/password:
+    put:
+      tags: [User]
+      summary: Changer le mot de passe
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /email/resend:
+    post:
+      tags: [User]
+      summary: Renvoyer l'e-mail de vérification
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /email/verification-notification:
+    post:
+      tags: [User]
+      summary: Alias Laravel pour renvoyer la vérification
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Données agrégées tableau de bord
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits:
+    get:
+      tags: [Outfits]
+      summary: Liste des tenues (pagination)
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: per_page
+          in: query
+          schema: { type: integer, maximum: 100 }
+      responses:
+        '200':
+          description: Liste paginée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Outfits]
+      summary: Créer une tenue
+      security: [{ BearerAuth: [] }]
+      responses:
+        '201':
+          description: Créée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /outfits/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Outfits]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Détail
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Non trouvé
+    put:
+      tags: [Outfits]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: MAJ
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Outfits]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Supprimé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{id}/similar:
+    get:
+      tags: [Outfits]
+      summary: Tenues similaires
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{outfitId}/images:
+    post:
+      tags: [Outfits]
+      summary: Ajouter une image à une tenue
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: outfitId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{outfitId}/images/{imageId}:
+    delete:
+      tags: [Outfits]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: outfitId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: imageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{outfitId}/images/{imageId}/primary:
+    put:
+      tags: [Outfits]
+      summary: Définir l'image principale
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: outfitId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: imageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search/images:
+    post:
+      tags: [Search]
+      summary: Recherche d'images (SerpAPI si configuré)
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Résultats
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search/images/attach:
+    post:
+      tags: [Search]
+      summary: Attacher un résultat de recherche
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search/lens:
+    post:
+      tags: [Lens]
+      summary: Analyse Lens (image + options OpenAI si configuré)
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Analyse
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search/lens/history:
+    get:
+      tags: [Lens]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Historique
+
+  /search/lens/{id}:
+    get:
+      tags: [Lens]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Détail analyse
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search/lens/{id}/attach-outfit:
+    post:
+      tags: [Lens]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media/import:
+    post:
+      tags: [Media]
+      summary: Import média (Fast Server si configuré)
+      security: [{ BearerAuth: [] }]
+      responses:
+        '201':
+          description: Créé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media:
+    get:
+      tags: [Media]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Liste paginée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media/{id}:
+    get:
+      tags: [Media]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Media]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media/{id}/extract-frames:
+    post:
+      tags: [Media]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media/{id}/attach-outfit:
+    post:
+      tags: [Media]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /scan/start:
+    post:
+      tags: [Scan]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '202':
+          description: Scan démarré
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /scan/history:
+    get:
+      tags: [Scan]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /scan/{scanId}:
+    get:
+      tags: [Scan]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: scanId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Statut scan
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /scan/{scanId}/results:
+    get:
+      tags: [Scan]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: scanId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Résultats
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /scan/{scanId}/resolve:
+    post:
+      tags: [Scan]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: scanId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tags:
+    get:
+      tags: [Tags]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Liste
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Tags]
+      security: [{ BearerAuth: [] }]
+      responses:
+        '201':
+          description: Créé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tags/{id}:
+    delete:
+      tags: [Tags]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{id}/tags:
+    post:
+      tags: [Tags]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /outfits/{id}/tags/{tagId}:
+    delete:
+      tags: [Tags]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: tagId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token Sanctum retourné par `/login` ou `/register`.
+
+  schemas:
+    AuthSuccess:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            token: { type: string }
+            user: { type: object }
+        message: { type: string }
+
+  responses:
+    ValidationError:
+      description: Erreur de validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+    Unauthorized:
+      description: Non authentifié
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: false }
+              message: { type: string }
+
+security: []

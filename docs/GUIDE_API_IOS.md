@@ -2,6 +2,13 @@
 
 Ce document décrit comment l’application **iOS (Swift / SwiftUI)** interagit avec l’API REST **Driply** (Laravel + Sanctum).
 
+**Sur le site déployé** (remplace par ton domaine) :
+
+- Page d’accueil : `/`
+- Doc interactive OpenAPI (Redoc) : `/docs`
+- Fichier **OpenAPI 3** importable (Postman, Stoplight, etc.) : `/openapi.yaml`
+- Ce guide en Markdown : `/docs/guide-ios`
+
 **URL de base (production)** : `https://api.driply.app/api` (adapter selon ton `APP_URL`).
 
 ### Vérifier que le serveur est prêt

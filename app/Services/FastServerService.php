@@ -27,6 +27,10 @@ class FastServerService
 
         $sanitized = $this->sanitizeUrl($url);
 
+        if ($this->isFastSaverApiHost($base)) {
+            return $this->fetchViaFastSaverApi($base, $sanitized, $key);
+        }
+
         try {
             $response = Http::timeout(60)
                 ->withHeaders(array_filter([
@@ -53,14 +57,72 @@ class FastServerService
             throw new ExternalServiceException('Invalid Fast Server response');
         }
 
+        return $this->normalizeFetchPayload($json);
+    }
+
+    /**
+     * FastSaverAPI : GET /get-info?url=&token= (voir https://fastsaverapi.com/docs ).
+     */
+    private function isFastSaverApiHost(string $base): bool
+    {
+        $host = (string) parse_url($base, PHP_URL_HOST);
+
+        return $host !== '' && str_contains(Str::lower($host), 'fastsaverapi.com');
+    }
+
+    private function fetchViaFastSaverApi(string $base, string $sanitizedUrl, string $token): array
+    {
+        if ($token === '') {
+            throw new ExternalServiceException('FastSaverAPI token (FASTSERVER_KEY) is not configured');
+        }
+
+        try {
+            $response = Http::timeout(60)
+                ->acceptJson()
+                ->get($base.'/get-info', [
+                    'url' => $sanitizedUrl,
+                    'token' => $token,
+                ]);
+
+            if ($response->failed()) {
+                $response->throw();
+            }
+        } catch (RequestException $e) {
+            throw new ExternalServiceException('FastSaverAPI request failed: '.$e->getMessage(), 0, $e);
+        } catch (Throwable $e) {
+            throw new ExternalServiceException('FastSaverAPI unavailable: '.$e->getMessage(), 0, $e);
+        }
+
+        $json = $response->json();
+        if (! is_array($json)) {
+            throw new ExternalServiceException('Invalid FastSaverAPI response');
+        }
+
+        if (($json['error'] ?? false) === true) {
+            $msg = (string) ($json['message'] ?? $json['detail'] ?? 'FastSaverAPI error');
+
+            throw new ExternalServiceException($msg);
+        }
+
+        return $this->normalizeFetchPayload($json);
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     * @return array{download_url: string, thumbnail_url: string|null, title: string|null, duration: int|null, type: string}
+     */
+    private function normalizeFetchPayload(array $json): array
+    {
         $downloadUrl = (string) ($json['download_url'] ?? $json['url'] ?? '');
         if ($downloadUrl === '') {
             throw new ExternalServiceException('Fast Server did not return a download URL');
         }
 
         $downloadUrl = $this->sanitizeUrl($downloadUrl);
-        $thumb = isset($json['thumbnail_url']) ? $this->sanitizeUrlOptional((string) $json['thumbnail_url']) : null;
-        $title = isset($json['title']) ? (string) $json['title'] : null;
+        $thumbRaw = $json['thumbnail_url'] ?? $json['thumb'] ?? null;
+        $thumb = is_string($thumbRaw) ? $this->sanitizeUrlOptional($thumbRaw) : null;
+        $titleRaw = $json['title'] ?? $json['caption'] ?? null;
+        $title = is_string($titleRaw) ? $titleRaw : null;
         $duration = isset($json['duration']) ? (int) $json['duration'] : (isset($json['duration_seconds']) ? (int) $json['duration_seconds'] : null);
         $type = Str::lower((string) ($json['type'] ?? 'video'));
         if (! in_array($type, ['image', 'video'], true)) {

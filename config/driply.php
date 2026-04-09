@@ -16,6 +16,10 @@ return [
         'key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o'),
     ],
+    /*
+    | Import médias réseaux : backend custom POST /media/fetch, ou FastSaverAPI
+    | (FASTSERVER_URL hôte fastsaverapi.com → GET /get-info + token en query).
+    */
     'fastserver' => [
         'url' => rtrim((string) env('FASTSERVER_URL', ''), '/'),
         'key' => env('FASTSERVER_KEY'),
