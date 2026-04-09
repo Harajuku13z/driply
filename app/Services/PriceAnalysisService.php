@@ -121,6 +121,191 @@ PROMPT;
     }
 
     /**
+     * Étape finale : classement des offres à partir de l’article identifié par vision + catalogue filtré.
+     *
+     * @param  array<string, mixed>  $itemDetails  Sortie GPT vision (search_query_en, color_primary, …)
+     * @param  array<int, array<string, mixed>>  $products  Produits avec éventuellement color_match
+     * @return array<string, mixed>
+     */
+    public function finalizeLensShoppingFromVision(array $itemDetails, array $products, string $currency, string $searchQueriesLabel): array
+    {
+        $key = (string) config('driply.openai.key', '');
+        if ($key === '') {
+            throw new ExternalServiceException('OpenAI API key is not configured');
+        }
+
+        $model = (string) config('driply.openai.model', 'gpt-4o');
+        $forPrompt = [];
+        foreach ($products as $p) {
+            if (! is_array($p)) {
+                continue;
+            }
+            $row = $p;
+            unset($row['color_match']);
+            $forPrompt[] = $row;
+        }
+        $listJson = json_encode($forPrompt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+
+        $type = (string) ($itemDetails['item_type'] ?? '');
+        $brand = (string) ($itemDetails['brand'] ?? '');
+        $modelName = (string) ($itemDetails['model'] ?? '');
+        $color = (string) ($itemDetails['color_primary'] ?? '');
+        $details = (string) ($itemDetails['details'] ?? '');
+
+        $prompt = <<<PROMPT
+Article identifié avec certitude (vision sur la photo) :
+- Type     : {$type}
+- Marque   : {$brand}
+- Modèle   : {$modelName}
+- Couleur  : {$color}
+- Détails  : {$details}
+
+Produits trouvés (triés, correspondance couleur indiquée par color_match retirée du JSON — privilégie les titres cohérents avec la couleur "{$color}") :
+{$listJson}
+
+MISSION :
+1. Garder UNIQUEMENT les produits dont la couleur correspond à "{$color}" lorsque c’est identifiable dans le titre ; si moins de 3 correspondent, garde les plus proches.
+2. Chaque résultat doit avoir un lien différent (domaines différents).
+3. 3 à 5 résultats maximum.
+
+Réponds UNIQUEMENT avec un JSON valide UTF-8 (sans markdown ni backticks) :
+{
+  "item_confirmed": "description complète de l'article",
+  "brand": "marque",
+  "model": "modèle",
+  "color": "couleur exacte",
+  "price_summary": {
+    "lowest": nombre,
+    "average": nombre,
+    "highest": nombre
+  },
+  "explanation": "2 phrases en français sur la fourchette de prix",
+  "results": [
+    {
+      "rank_label": "Meilleur prix ou Prix moyen ou Premium ou Bon plan",
+      "title": "titre produit",
+      "price": nombre,
+      "price_formatted": "49,99 €",
+      "source": "nom du site",
+      "link": "url d'achat",
+      "thumbnail": "url image",
+      "note": "1 phrase pourquoi ce résultat"
+    }
+  ]
+}
+PROMPT;
+
+        try {
+            $response = Http::timeout(120)
+                ->withToken($key)
+                ->acceptJson()
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model' => $model,
+                    'messages' => [
+                        ['role' => 'system', 'content' => 'Tu es expert mode et pricing. Tu réponds uniquement en JSON valide, sans markdown.'],
+                        ['role' => 'user', 'content' => $prompt],
+                    ],
+                    'temperature' => 0,
+                    'response_format' => ['type' => 'json_object'],
+                ])
+                ->throw();
+        } catch (RequestException $e) {
+            throw new ExternalServiceException('OpenAI request failed: '.$e->getMessage(), 0, $e);
+        } catch (Throwable $e) {
+            throw new ExternalServiceException('OpenAI unavailable: '.$e->getMessage(), 0, $e);
+        }
+
+        $body = $response->json();
+        $content = $body['choices'][0]['message']['content'] ?? null;
+        if (! is_string($content) || $content === '') {
+            throw new ExternalServiceException('Invalid OpenAI response');
+        }
+
+        try {
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            throw new ExternalServiceException('OpenAI returned non-JSON content');
+        }
+
+        $this->assertLensFinalizeShape($decoded);
+
+        $topResults = [];
+        $seenLinks = [];
+        foreach ($decoded['results'] ?? [] as $r) {
+            if (! is_array($r)) {
+                continue;
+            }
+            $link = (string) ($r['link'] ?? '');
+            if ($link === '' || isset($seenLinks[$link])) {
+                continue;
+            }
+            $seenLinks[$link] = true;
+            $price = $r['price'] ?? 0;
+            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $topResults[] = [
+                'rank_label' => (string) ($r['rank_label'] ?? ''),
+                'title' => (string) ($r['title'] ?? 'Sans titre'),
+                'price' => $priceF,
+                'price_formatted' => (string) ($r['price_formatted'] ?? ''),
+                'source' => (string) ($r['source'] ?? ''),
+                'link' => $link,
+                'thumbnail' => (string) ($r['thumbnail'] ?? ''),
+                'why_selected' => (string) ($r['note'] ?? ''),
+            ];
+            if (count($topResults) >= 8) {
+                break;
+            }
+        }
+
+        $summary = is_array($decoded['price_summary'] ?? null) ? $decoded['price_summary'] : [];
+        if ($summary === []) {
+            $summary = ['lowest' => 0.0, 'average' => 0.0, 'highest' => 0.0];
+        }
+
+        $v2 = [
+            'item_identified' => (string) ($decoded['item_confirmed'] ?? $type),
+            'item_type' => $type !== '' ? $type : (string) ($decoded['item_confirmed'] ?? ''),
+            'color' => (string) ($decoded['color'] ?? $color),
+            'brand' => $decoded['brand'] ?? ($brand !== '' ? $brand : null),
+            'price_summary' => $summary,
+            'explanation' => (string) ($decoded['explanation'] ?? ''),
+            'top_results' => $topResults,
+            'currency' => $currency,
+            'confidence' => (string) ($itemDetails['confidence'] ?? 'medium'),
+            'style' => 'non déterminé',
+        ];
+
+        $this->assertLensV2AnalysisShape($v2);
+
+        $merged = $this->mergeLensV2WithLegacyFields($v2, $searchQueriesLabel, $products);
+        $this->assertLensListAnalysisShape($merged);
+
+        $merged['vision_item'] = $itemDetails;
+        $merged['model'] = (string) ($decoded['model'] ?? $modelName);
+
+        return $this->applyLensListNumericFixups($merged, $products);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function assertLensFinalizeShape(array $data): void
+    {
+        foreach (['item_confirmed', 'price_summary', 'results', 'explanation'] as $key) {
+            if (! array_key_exists($key, $data)) {
+                throw new ExternalServiceException('OpenAI finalize JSON missing key: '.$key);
+            }
+        }
+        if (! is_array($data['price_summary'])) {
+            throw new ExternalServiceException('OpenAI finalize: price_summary must be an object');
+        }
+        if (! is_array($data['results'])) {
+            throw new ExternalServiceException('OpenAI finalize: results must be an array');
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $v2
      * @param  array<int, array<string, mixed>>  $products
      * @return array<string, mixed>

@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\LensIdentificationFailedException;
 use App\Support\UnwrapGoogleUrl;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * Lens SerpAPI → requête précise (knowledge_graph + visual_matches, vision si peu d’offres)
- * → Google Shopping → fusion + dédoublonnage par domaine → analyse GPT (top_results + price_summary).
+ * 1) GPT-4o vision sur les octets (base64) → détail article + requêtes Shopping
+ * 2) Google Shopping (EN puis FR) + Google Lens (URL publique) → fusion
+ * 3) Filtre prix + domaine + hint couleur → tri
+ * 4) GPT final → results / price_analysis legacy
  */
 class LensImagePriceSearchService
 {
@@ -32,49 +36,72 @@ class LensImagePriceSearchService
      *     price_summary: array<string, mixed>|null,
      * }
      */
-    public function searchAndAnalyze(string $imagePublicUrl, string $currency): array
+    public function searchAndAnalyze(string $relativePublicPath, string $imagePublicUrl, string $currency): array
     {
+        if (! Storage::disk('public')->exists($relativePublicPath)) {
+            throw new LensIdentificationFailedException('Image introuvable après enregistrement.');
+        }
+
+        $bytes = Storage::disk('public')->get($relativePublicPath);
+        if ($bytes === false || $bytes === '') {
+            throw new LensIdentificationFailedException('Image introuvable après enregistrement.');
+        }
+
+        $mime = $this->mimeFromPublicPath($relativePublicPath);
+        $itemDetails = $this->visionQuery->extractStructuredItemFromBytes($bytes, $mime);
+
         $hl = (string) config('driply.lens.shopping_hl', 'fr');
         $gl = (string) config('driply.lens.shopping_gl', 'fr');
-        $visionThreshold = (int) config('driply.lens.vision_shopping_threshold', 3);
-        $shoppingLimit = (int) config('driply.lens.shopping_fetch_limit', 20);
+        $shoppingNum = (int) config('driply.lens.shopping_fetch_limit', 20);
+
+        $en = trim((string) ($itemDetails['search_query_en'] ?? ''));
+        $fr = trim((string) ($itemDetails['search_query_fr'] ?? ''));
+        $queries = array_values(array_unique(array_filter([$en, $fr], fn (string $q): bool => $q !== '')));
+
+        $allRaw = [];
+
+        foreach ($queries as $query) {
+            $rows = $this->serpApi->googleShoppingRawRows($query, $shoppingNum, $gl, $hl);
+            $addedWithPrice = 0;
+            foreach ($rows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $allRaw[] = $row;
+                if ($this->serpApi->shoppingRowHasExtractedPrice($row)) {
+                    $addedWithPrice++;
+                }
+            }
+            if ($addedWithPrice >= 10) {
+                break;
+            }
+        }
 
         $lensData = $this->serpApi->rawLensResponse($imagePublicUrl, $hl, $gl);
         $lensShopping = $lensData['shopping_results'] ?? [];
-        if (! is_array($lensShopping)) {
-            $lensShopping = [];
+        if (is_array($lensShopping)) {
+            foreach ($lensShopping as $row) {
+                if (is_array($row)) {
+                    $allRaw[] = $row;
+                }
+            }
         }
+
+        $products = $this->filterDedupeColorSort($allRaw, $itemDetails);
+
         $visualMatches = $lensData['visual_matches'] ?? [];
         if (! is_array($visualMatches)) {
             $visualMatches = [];
         }
-
-        $searchQuery = $this->buildPreciseSearchQuery($lensData, $visualMatches);
-
-        if (count($lensShopping) < $visionThreshold && $searchQuery !== '') {
-            $searchQuery = $this->visionQuery->preciseShoppingQuery($imagePublicUrl, $searchQuery);
-        }
-
-        if ($searchQuery === '') {
-            $searchQuery = $this->firstVisualMatchTitle($visualMatches);
-        }
-
-        $mergedRaw = $lensShopping;
-        if ($searchQuery !== '') {
-            $fetched = $this->serpApi->googleShoppingSearch($searchQuery, $shoppingLimit, $gl, $hl);
-            foreach ($fetched as $parsed) {
-                $mergedRaw[] = $this->parsedOfferToPseudoRawRow($parsed);
-            }
-        }
-
-        $products = $this->catalogRowsDedupeByHostSortByPrice($mergedRaw);
         if (count($products) < 3) {
             $products = $this->supplementWithVisualMatches($products, $visualMatches, minRows: 3);
         }
 
         $products = array_slice($products, 0, 10);
 
-        $analysis = $this->priceAnalysis->analyzeLensProductList($products, $currency, $searchQuery);
+        $searchLabel = implode(' | ', $queries);
+
+        $analysis = $this->priceAnalysis->finalizeLensShoppingFromVision($itemDetails, $products, $currency, $searchLabel);
         /** @var array<int, array<string, mixed>> $top3 */
         $top3 = is_array($analysis['top_3_picks'] ?? null) ? $analysis['top_3_picks'] : [];
         /** @var array<int, array<string, mixed>> $topResults */
@@ -91,96 +118,39 @@ class LensImagePriceSearchService
             'price_analysis' => $analysis,
             'top_3' => $top3,
             'top_results' => $topResults,
-            'query_used' => (string) ($analysis['search_query_used'] ?? $searchQuery),
-            'item_detected' => (string) ($analysis['item_identified'] ?? $searchQuery),
+            'query_used' => $searchLabel,
+            'item_detected' => (string) ($analysis['item_identified'] ?? ''),
             'brand' => $brand,
             'color' => isset($analysis['color']) ? (string) $analysis['color'] : null,
             'price_summary' => $priceSummary,
         ];
     }
 
-    /**
-     * @param  array<string, mixed>  $lensData
-     * @param  array<int, mixed>  $visualMatches
-     */
-    private function buildPreciseSearchQuery(array $lensData, array $visualMatches): string
+    private function mimeFromPublicPath(string $relative): string
     {
-        $kg = $lensData['knowledge_graph'] ?? [];
-        if (! is_array($kg)) {
-            $kg = [];
-        }
-        $kgTitle = trim((string) ($kg['title'] ?? ''));
-        $kgSubtitle = trim((string) ($kg['subtitle'] ?? ''));
-        $kgSource = trim((string) ($kg['source'] ?? $kg['type'] ?? ''));
+        $ext = Str::lower((string) pathinfo($relative, PATHINFO_EXTENSION));
 
-        $parts = [];
-        if ($kgTitle !== '') {
-            $parts[] = $kgTitle;
-        }
-        if ($kgSubtitle !== '' && ! Str::contains(Str::lower($kgTitle), Str::lower($kgSubtitle))) {
-            $parts[] = $kgSubtitle;
-        }
-        if ($kgSource !== '' && ! Str::contains(Str::lower(implode(' ', $parts)), Str::lower($kgSource))) {
-            $parts[] = $kgSource;
-        }
-
-        if ($parts !== []) {
-            return Str::limit(trim(implode(' ', $parts)), 220, '');
-        }
-
-        return $this->firstVisualMatchTitle($visualMatches);
+        return match ($ext) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            default => 'image/jpeg',
+        };
     }
 
     /**
-     * @param  array<int, mixed>  $visualMatches
-     */
-    private function firstVisualMatchTitle(array $visualMatches): string
-    {
-        $sorted = array_values(array_filter($visualMatches, fn ($i): bool => is_array($i)));
-        usort($sorted, fn (array $a, array $b): int => ((int) ($a['position'] ?? 999_999)) <=> ((int) ($b['position'] ?? 999_999)));
-        $first = $sorted[0] ?? null;
-        if (! is_array($first)) {
-            return '';
-        }
-
-        return Str::limit(trim((string) ($first['title'] ?? '')), 220, '');
-    }
-
-    /**
-     * @param  array<string, mixed>  $parsed  Format googleShoppingSearch()
-     * @return array<string, mixed>
-     */
-    private function parsedOfferToPseudoRawRow(array $parsed): array
-    {
-        $row = [
-            'title' => $parsed['title'] ?? '',
-            'link' => $parsed['link'] ?? '',
-            'source' => $parsed['source'] ?? '',
-            'thumbnail' => $parsed['thumbnail_url'] ?? '',
-        ];
-        if (isset($parsed['extracted_price']) && is_numeric($parsed['extracted_price'])) {
-            $row['extracted_price'] = $parsed['extracted_price'] + 0;
-        }
-        if (($parsed['price'] ?? null) !== null) {
-            $row['price'] = $parsed['price'];
-        }
-        if (($parsed['currency'] ?? null) !== null) {
-            $row['currency'] = $parsed['currency'];
-        }
-
-        return $row;
-    }
-
-    /**
-     * Un produit par domaine, priorité aux prix les plus bas.
-     *
-     * @param  array<int, mixed>  $shoppingResults
+     * @param  array<int, mixed>  $allRaw
+     * @param  array<string, mixed>  $itemDetails
      * @return array<int, array<string, mixed>>
      */
-    private function catalogRowsDedupeByHostSortByPrice(array $shoppingResults): array
+    private function filterDedupeColorSort(array $allRaw, array $itemDetails): array
     {
-        $candidates = [];
-        foreach ($shoppingResults as $row) {
+        $colorPrimary = Str::lower(trim((string) ($itemDetails['color_primary'] ?? '')));
+        $seen = [];
+        $products = [];
+
+        foreach ($allRaw as $row) {
             if (! is_array($row)) {
                 continue;
             }
@@ -192,31 +162,78 @@ class LensImagePriceSearchService
             if ($link === '') {
                 continue;
             }
-            $host = $this->normalizeHost($link);
-            if ($host === '') {
+            if (! isset($p['extracted_price']) || ! is_numeric($p['extracted_price'])) {
                 continue;
             }
-            $price = isset($p['extracted_price']) && is_numeric($p['extracted_price']) ? (float) $p['extracted_price'] : null;
-            $candidates[] = ['host' => $host, 'price' => $price ?? 1e12, 'p' => $p];
-        }
-
-        usort($candidates, fn (array $a, array $b): int => $a['price'] <=> $b['price']);
-
-        $seen = [];
-        $out = [];
-        foreach ($candidates as $c) {
-            $h = $c['host'];
-            if (isset($seen[$h])) {
+            $domain = $this->normalizeHost($link);
+            if ($domain === '' || isset($seen[$domain])) {
                 continue;
             }
-            $seen[$h] = true;
-            $out[] = $c['p'];
-            if (count($out) >= 15) {
+            $seen[$domain] = true;
+
+            $titleLower = Str::lower((string) ($p['title'] ?? ''));
+            $colorMatch = $this->titleMatchesColorHint($titleLower, $colorPrimary);
+
+            $products[] = array_merge($p, ['color_match' => $colorMatch]);
+            if (count($products) >= 15) {
                 break;
             }
         }
 
-        return array_values($out);
+        usort($products, function (array $a, array $b): int {
+            $ca = ! empty($a['color_match']);
+            $cb = ! empty($b['color_match']);
+            if ($ca !== $cb) {
+                return $cb <=> $ca;
+            }
+
+            return ($a['extracted_price'] ?? 0) <=> ($b['extracted_price'] ?? 0);
+        });
+
+        return array_values($products);
+    }
+
+    private function titleMatchesColorHint(string $titleLower, string $colorPrimaryFr): bool
+    {
+        $raw = Str::lower(trim($colorPrimaryFr));
+        if ($raw === '') {
+            return true;
+        }
+
+        $map = [
+            'noir' => ['black', 'noir', 'schwarz'],
+            'blanc' => ['white', 'blanc', 'weiß', 'weiss'],
+            'bleu' => ['blue', 'bleu', 'indigo', 'navy', 'marine'],
+            'rouge' => ['red', 'rouge'],
+            'vert' => ['green', 'vert', 'olive'],
+            'gris' => ['grey', 'gray', 'gris'],
+            'beige' => ['beige', 'sand', 'cream'],
+            'marron' => ['brown', 'marron', 'camel', 'tan'],
+            'jaune' => ['yellow', 'jaune'],
+            'rose' => ['pink', 'rose'],
+            'violet' => ['violet', 'purple', 'pourpre'],
+            'orange' => ['orange'],
+        ];
+
+        $variants = null;
+        if (isset($map[$raw])) {
+            $variants = $map[$raw];
+        } else {
+            foreach ($map as $k => $v) {
+                if (Str::contains($raw, $k)) {
+                    $variants = $v;
+                    break;
+                }
+            }
+        }
+        $variants ??= [$raw];
+        foreach ($variants as $variant) {
+            if ($variant !== '' && str_contains($titleLower, $variant)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function normalizeHost(string $url): string
@@ -282,6 +299,7 @@ class LensImagePriceSearchService
                 'thumbnail' => $thumb !== '' ? $thumb : ($image !== '' ? $image : null),
                 'rating' => isset($vm['rating']) && is_numeric($vm['rating']) ? $vm['rating'] + 0 : null,
                 'reviews' => isset($vm['reviews']) && is_numeric($vm['reviews']) ? (int) $vm['reviews'] : null,
+                'color_match' => true,
             ];
         }
 

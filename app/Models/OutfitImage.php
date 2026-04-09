@@ -18,6 +18,9 @@ class OutfitImage extends Model
         'url',
         'source',
         'is_primary',
+        'title',
+        'buy_link',
+        'price_found',
     ];
 
     /**

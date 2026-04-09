@@ -84,6 +84,7 @@ class LensAnalyzeResponseTest extends TestCase
                     'item_detected',
                     'price_summary',
                     'top_results',
+                    'results',
                     'all_products',
                     'top_3',
                     'price_analysis' => [

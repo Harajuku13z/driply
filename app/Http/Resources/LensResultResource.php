@@ -35,6 +35,8 @@ class LensResultResource extends JsonResource
             'color' => $analysis['color'] ?? null,
             'price_summary' => $analysis['price_summary'] ?? null,
             'top_results' => $analysis['top_results'] ?? [],
+            'results' => $analysis['top_results'] ?? [],
+            'vision_item' => $analysis['vision_item'] ?? null,
             'all_products' => $products,
             'lens_products' => $products,
             'top_3' => $analysis['top_3_picks'] ?? [],

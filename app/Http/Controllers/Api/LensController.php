@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ExternalServiceException;
+use App\Exceptions\LensIdentificationFailedException;
 use App\Http\Controllers\Concerns\ApiResponses;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Lens\LensAnalyzeRequest;
@@ -60,7 +61,7 @@ class LensController extends Controller
                 ]);
             }
 
-            $payload = $lensSearch->searchAndAnalyze($inputPreviewUrl, $currency);
+            $payload = $lensSearch->searchAndAnalyze($inputPath, $inputPreviewUrl, $currency);
             $allProducts = $payload['all_products'];
             $priceAnalysis = $payload['price_analysis'];
             $top3 = $payload['top_3'];
@@ -88,10 +89,13 @@ class LensController extends Controller
                 'color' => $color,
                 'price_summary' => $priceSummary,
                 'top_results' => $topResults,
+                'results' => $topResults,
                 'all_products' => $allProducts,
                 'price_analysis' => $priceAnalysis,
                 'top_3' => $top3,
             ], 'Analyse terminée');
+        } catch (LensIdentificationFailedException $e) {
+            return $this->error($e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (ExternalServiceException $e) {
             return $this->error($e->getMessage(), Response::HTTP_BAD_GATEWAY);
         }

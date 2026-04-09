@@ -26,6 +26,9 @@ class OutfitImageResource extends JsonResource
             'url' => $url,
             'source' => $this->source instanceof \BackedEnum ? $this->source->value : $this->source,
             'is_primary' => (bool) $this->is_primary,
+            'title' => $this->title,
+            'buy_link' => $this->buy_link,
+            'price_found' => $this->price_found !== null ? (float) $this->price_found : null,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

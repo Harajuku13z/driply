@@ -209,6 +209,71 @@ class SerpApiService
     }
 
     /**
+     * Lignes brutes `shopping_results` (fusion Lens + Shopping).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function googleShoppingRawRows(string $query, int $num = 20, ?string $gl = null, ?string $hl = null): array
+    {
+        $this->assertKey();
+        $q = trim($query);
+        if ($q === '') {
+            return [];
+        }
+
+        $params = [
+            'engine' => 'google_shopping',
+            'q' => $q,
+            'api_key' => $this->apiKey,
+            'num' => min(max($num, 1), 40),
+        ];
+        if ($gl !== null && $gl !== '') {
+            $params['gl'] = $gl;
+        }
+        if ($hl !== null && $hl !== '') {
+            $params['hl'] = $hl;
+        }
+        if (config('driply.serpapi.no_cache', true)) {
+            $params['no_cache'] = 'true';
+        }
+
+        try {
+            $response = Http::timeout(45)
+                ->acceptJson()
+                ->get($this->baseUrl.'/search', $params)
+                ->throw();
+        } catch (RequestException $e) {
+            throw new ExternalServiceException('SerpAPI Google Shopping failed: '.$e->getMessage(), 0, $e);
+        } catch (Throwable $e) {
+            throw new ExternalServiceException('SerpAPI Shopping unavailable: '.$e->getMessage(), 0, $e);
+        }
+
+        $payload = $response->json();
+        $rows = is_array($payload) ? ($payload['shopping_results'] ?? []) : [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (is_array($row)) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    public function shoppingRowHasExtractedPrice(array $row): bool
+    {
+        $parsed = $this->parseShoppingResultRow($row);
+
+        return $parsed !== null
+            && isset($parsed['extracted_price'])
+            && is_numeric($parsed['extracted_price']);
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      * @return array{title: string, link: string, source: string, thumbnail_url: string, price: ?string, extracted_price: float|int|null, currency: ?string}|null
      */

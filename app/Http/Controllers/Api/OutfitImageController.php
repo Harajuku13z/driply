@@ -50,6 +50,9 @@ class OutfitImageController extends Controller
             $data = $request->validate([
                 'image_url' => ['required', 'url', 'max:2048'],
                 'source' => ['nullable', 'string', Rule::enum(OutfitImageSource::class)],
+                'title' => ['nullable', 'string', 'max:500'],
+                'buy_link' => ['nullable', 'url', 'max:2048'],
+                'price_found' => ['nullable', 'numeric', 'min:0'],
             ]);
 
             $remote = trim((string) $data['image_url']);
@@ -78,6 +81,9 @@ class OutfitImageController extends Controller
                 'url' => $path,
                 'source' => $source,
                 'is_primary' => ! $hasPrimary,
+                'title' => $data['title'] ?? null,
+                'buy_link' => $data['buy_link'] ?? null,
+                'price_found' => isset($data['price_found']) ? (float) $data['price_found'] : null,
             ]);
         } else {
             $request->validate([
