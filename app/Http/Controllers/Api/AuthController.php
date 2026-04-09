@@ -16,6 +16,7 @@ use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Storage;
@@ -51,27 +52,47 @@ class AuthController extends Controller
 
     /**
      * Confirme l’e-mail à partir du lien signé envoyé par courriel (aucune session requise).
+     * Navigateur : page HTML Driply. Client API : JSON si Accept: application/json.
      */
-    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse
+    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse|HttpResponse
     {
         $user = User::query()->findOrFail($id);
 
         if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            if ($this->wantsVerifyEmailPage($request)) {
+                return response()->view('auth.verify-email-failed', ['reason' => 'invalid'], Response::HTTP_FORBIDDEN);
+            }
+
             return $this->error('Lien de vérification invalide.', Response::HTTP_FORBIDDEN);
         }
 
         if (! $user->hasVerifiedEmail()) {
             if (! $user->markEmailAsVerified()) {
+                if ($this->wantsVerifyEmailPage($request)) {
+                    return response()->view('auth.verify-email-failed', ['reason' => 'server'], Response::HTTP_INTERNAL_SERVER_ERROR);
+                }
+
                 return $this->error('La vérification a échoué.', Response::HTTP_INTERNAL_SERVER_ERROR);
             }
 
             event(new Verified($user));
         }
 
+        if ($this->wantsVerifyEmailPage($request)) {
+            return response()->view('auth.verify-email-success', [
+                'user' => $user->fresh(),
+            ]);
+        }
+
         return $this->success([
             'verified' => true,
             'user' => new UserResource($user->fresh()),
         ], 'E-mail vérifié.');
+    }
+
+    private function wantsVerifyEmailPage(Request $request): bool
+    {
+        return ! $request->wantsJson();
     }
 
     /**

@@ -25,6 +25,10 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e): bool {
+            if ($request->is('api/email/verify/*') && ! $request->wantsJson()) {
+                return false;
+            }
+
             return $request->is('api/*');
         });
 
@@ -53,6 +57,12 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (InvalidSignatureException $e, Request $request) {
+            if ($request->is('api/email/verify/*') && ! $request->wantsJson()) {
+                return response()->view('auth.verify-email-failed', [
+                    'reason' => 'signature',
+                ], 403);
+            }
+
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
