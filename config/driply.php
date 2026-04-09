@@ -3,6 +3,11 @@
 declare(strict_types=1);
 
 return [
+    /*
+    | Si renseigné, la page /api-verif exige ?token=VOTRE_TOKEN
+    */
+    'api_verif_token' => env('API_VERIF_TOKEN'),
+
     'serpapi' => [
         'key' => env('SERPAPI_KEY'),
         'base_url' => 'https://serpapi.com',
