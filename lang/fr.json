@@ -1,5 +1,7 @@
 {
     "Verify Email Address": "Vérifier mon adresse e-mail",
     "Please click the button below to verify your email address.": "Clique sur le bouton ci-dessous pour confirmer ton adresse e-mail.",
-    "If you did not create an account, no further action is required.": "Si tu n’as pas créé de compte, tu peux ignorer ce message."
+    "If you did not create an account, no further action is required.": "Si tu n’as pas créé de compte, tu peux ignorer ce message.",
+    "Hello :name,": "Bonjour :name,",
+    "Link not working?": "Le bouton ne fonctionne pas ?"
 }

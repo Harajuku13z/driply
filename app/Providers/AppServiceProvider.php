@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\User;
 use App\Services\FastServerService;
 use App\Services\GoogleLensService;
 use App\Services\PHashService;
@@ -12,8 +13,10 @@ use App\Services\SerpApiService;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -52,6 +55,16 @@ class AppServiceProvider extends ServiceProvider
                     'hash' => sha1($notifiable->getEmailForVerification()),
                 ]
             );
+        });
+
+        VerifyEmail::toMailUsing(function (object $notifiable, string $verificationUrl): MailMessage {
+            /** @var User $notifiable */
+            return (new MailMessage)
+                ->subject(Lang::get('Verify Email Address'))
+                ->view('emails.verify-email', [
+                    'verificationUrl' => $verificationUrl,
+                    'userName' => (string) ($notifiable->name ?? ''),
+                ]);
         });
     }
 }
