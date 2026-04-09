@@ -53,4 +53,6 @@ Si tu ne peux pas changer la racine :
 
 - `https://driplyapp.fr/` → page Laravel (welcome) ou redirection.
 - `https://driplyapp.fr/up` → réponse de santé.
-- `https://driplyapp.fr/api-verif` → tableau de diagnostic.
+- `https://driplyapp.fr/api-verif` → tableau de diagnostic (équivalent : `/api/verif`).
+- **404** alors que `/up` fonctionne : souvent **mauvaise URL** — le diagnostic n’est pas sous le préfixe REST générique : utilise **`/api-verif`** ou **`/api/verif`**, pas un chemin inventé du type `/api/verification`.
+- **403** « token » : tu as défini `API_VERIF_TOKEN` dans `.env` → ajoute `?token=...` à l’URL.

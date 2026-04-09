@@ -5,7 +5,7 @@
 
     RewriteEngine On
 
-    # Hostinger / sous-dossier : décommente et adapte si les routes renvoient 404
+    # Sous-dossier URL uniquement : décommente/adapte (ex. /blog/public/)
     # RewriteBase /
 
     # Handle Authorization Header
@@ -16,10 +16,14 @@
     RewriteCond %{HTTP:x-xsrf-token} .
     RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
 
-    # Redirect Trailing Slashes If Not A Folder...
+    # Trailing slash → canonique sans slash (évite Location erronée …/public/… sur Hostinger)
     RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_URI} (.+)/$
-    RewriteRule ^ %1 [L,R=301]
+    RewriteCond %{REQUEST_URI} ^/public/(.+)/$
+    RewriteRule .* /%1 [L,R=301]
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} ^/(.+)/$
+    RewriteRule .* /%1 [L,R=301]
 
     # Send Requests To Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d

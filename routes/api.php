@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\ApiVerifController;
 use App\Http\Controllers\Api\LensController;
 use App\Http\Controllers\Api\MediaImportController;
 use App\Http\Controllers\Api\OutfitController;
@@ -12,6 +13,9 @@ use App\Http\Controllers\Api\ScanController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\TagController;
 use Illuminate\Support\Facades\Route;
+
+/** Même diagnostic que GET /api-verif (évite une 404 si on tape /api/verif). */
+Route::get('/verif', ApiVerifController::class);
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);

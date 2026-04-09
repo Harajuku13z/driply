@@ -6,7 +6,7 @@ Ce document décrit comment l’application **iOS (Swift / SwiftUI)** interagit 
 
 ### Vérifier que le serveur est prêt
 
-Ouvre dans un navigateur : **`{APP_URL sans /api}/api-verif`** (ex. `https://driplyapp.fr/api-verif`). La page liste PHP, base de données, cache, stockage, Sanctum, SMTP, clés optionnelles (SerpAPI, OpenAI, Fast Server). Format JSON : `.../api-verif?format=json`. En production, définis `API_VERIF_TOKEN` dans `.env` et appelle `.../api-verif?token=TON_TOKEN` (sinon la page est publique).
+Ouvre dans un navigateur : **`{APP_URL sans /api}/api-verif`** (ex. `https://driplyapp.fr/api-verif`). Même diagnostic sous **`{APP_URL}/api/verif`** si tu préfères le préfixe `/api`. La page liste PHP, base de données, cache, stockage, Sanctum, SMTP, clés optionnelles (SerpAPI, OpenAI, Fast Server). Format JSON : `.../api-verif?format=json` ou `.../api/verif?format=json`. En production, définis `API_VERIF_TOKEN` dans `.env` et appelle `...?token=TON_TOKEN` (sinon la page est publique).
 
 Toutes les réponses JSON suivent l’enveloppe :
 
