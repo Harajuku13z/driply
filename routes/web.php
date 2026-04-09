@@ -8,11 +8,17 @@ use App\Http\Controllers\Legacy\LegacyHostingerUploadController;
 use App\Http\Controllers\Legacy\LegacySyncMediaController;
 use App\Http\Controllers\OpenApiController;
 use App\Http\Controllers\PasswordResetWebController;
+use App\Http\Controllers\PublicDiskFileController;
 use App\Http\Controllers\SignedMediaController;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home');
+
+// Images Lens (et autres sous-dossiers autorisés) : fonctionne sans `php artisan storage:link`.
+Route::get('/driply-public/{path}', [PublicDiskFileController::class, 'show'])
+    ->where('path', 'lens/.+')
+    ->name('driply.public.storage');
 
 // Demande de lien (e-mail) — même effet que POST /api/forgot-password.
 Route::get('/mot-de-passe-oublie', [ForgotPasswordWebController::class, 'show'])

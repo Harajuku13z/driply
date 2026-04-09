@@ -28,10 +28,15 @@ return [
         'shopping_gl' => env('DRIPLY_SERPAPI_SHOPPING_GL', 'fr'),
         'shopping_hl' => env('DRIPLY_SERPAPI_SHOPPING_HL', 'fr'),
         /*
-        | URL publique HTTPS de base vers /storage (sans slash final). Obligatoire en prod si APP_URL
-        | est incorrect pour SerpAPI : ex. https://api.driplyapp.fr ou https://driplyapp.fr
+        | URL publique HTTPS de base vers /storage (sans slash final). Si défini, utilisé en priorité
+        | sur la route /driply-public/ (utile si ton serveur sert correctement /storage via symlink).
         */
         'public_storage_base_url' => env('DRIPLY_LENS_PUBLIC_STORAGE_BASE_URL', ''),
+        /*
+        | Si true : URL générée = APP_URL + /driply-public/lens/… (contourne symlink storage manquant).
+        | Mettre false uniquement si `php artisan storage:link` fonctionne et /storage/ est public.
+        */
+        'use_public_file_route' => filter_var(env('DRIPLY_LENS_USE_PUBLIC_FILE_ROUTE', true), FILTER_VALIDATE_BOOL),
     ],
     /*
     | App iOS (Hostinger legacy) : upload.php + api/sync_media.php avec en-tête X-Driply-Key.

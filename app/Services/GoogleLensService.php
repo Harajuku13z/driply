@@ -172,14 +172,24 @@ class GoogleLensService
             return $imagePathOrUrl;
         }
 
-        $base = rtrim((string) config('driply.lens.public_storage_base_url', ''), '/');
-        if ($base !== '') {
-            $path = ltrim($imagePathOrUrl, '/');
+        $relative = ltrim($imagePathOrUrl, '/');
 
-            return $base.'/storage/'.$path;
+        $useRoute = (bool) config('driply.lens.use_public_file_route', true);
+        if ($useRoute && str_starts_with($relative, 'lens/')) {
+            return url('/driply-public/'.$relative);
         }
 
-        return Storage::disk('public')->url($imagePathOrUrl);
+        $base = rtrim((string) config('driply.lens.public_storage_base_url', ''), '/');
+        if ($base !== '') {
+            return $base.'/storage/'.$relative;
+        }
+
+        $diskUrl = Storage::disk('public')->url($relative);
+        if (str_starts_with($diskUrl, 'http://') || str_starts_with($diskUrl, 'https://')) {
+            return $diskUrl;
+        }
+
+        return url($diskUrl);
     }
 
     /**
