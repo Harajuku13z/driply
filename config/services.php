@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    /*
+    | Alias optionnels (spec utilisateur) — utilisent les mêmes clés que config/driply.php
+    */
+    'serpapi' => [
+        'key' => env('SERPAPI_KEY'),
+    ],
+
+    'openai' => [
+        'key' => env('OPENAI_API_KEY'),
+    ],
+
 ];

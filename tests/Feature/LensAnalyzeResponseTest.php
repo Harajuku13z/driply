@@ -6,8 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Services\GoogleLensService;
-use App\Services\LensShoppingEnrichmentService;
-use App\Services\PriceAnalysisService;
+use App\Services\LensImagePriceSearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -31,28 +30,26 @@ class LensAnalyzeResponseTest extends TestCase
 
         $this->mock(GoogleLensService::class, function ($mock): void {
             $mock->shouldReceive('absolutePublicUrlForStoredPath')->andReturn('https://example.test/storage/lens/x.jpg');
-            $mock->shouldReceive('analyzeImage')->once()->andReturn(['visual_matches' => []]);
-            $mock->shouldReceive('extractTopMatchesWithFallback')->once()->andReturn([]);
         });
 
-        $this->mock(LensShoppingEnrichmentService::class, function ($mock): void {
-            $mock->shouldReceive('enrich')->once()->andReturn([]);
-            $mock->shouldReceive('ensureMinimumDepth')->once()->andReturn([]);
-        });
-
-        $this->mock(PriceAnalysisService::class, function ($mock): void {
-            $mock->shouldReceive('analyzeFromLensResults')->once()->andReturn([
-                'item_type' => 'Sneakers',
-                'style' => 'streetwear',
-                'color' => 'blanc',
-                'estimated_price_low' => 80.0,
-                'estimated_price_mid' => 120.0,
-                'estimated_price_high' => 180.0,
-                'currency' => 'EUR',
-                'confidence' => 'medium',
-                'explanation' => 'Test.',
-                'suggested_resale_price' => 100.0,
-                'sources_analyzed' => 0,
+        $this->mock(LensImagePriceSearchService::class, function ($mock): void {
+            $mock->shouldReceive('searchAndAnalyze')->once()->andReturn([
+                'all_products' => [],
+                'price_analysis' => [
+                    'item_type' => 'Sneakers',
+                    'style' => 'streetwear',
+                    'color' => 'blanc',
+                    'price_low' => 80.0,
+                    'price_mid' => 120.0,
+                    'price_high' => 180.0,
+                    'currency' => 'EUR',
+                    'confidence' => 'medium',
+                    'explanation' => 'Test.',
+                    'suggested_resale_price' => 100.0,
+                    'sources_analyzed' => 0,
+                    'top_3_picks' => [],
+                ],
+                'top_3' => [],
             ]);
         });
 
@@ -70,14 +67,15 @@ class LensAnalyzeResponseTest extends TestCase
                 'data' => [
                     'lens_result_id',
                     'input_image_public_url',
-                    'lens_results',
+                    'all_products',
+                    'top_3',
                     'price_analysis' => [
                         'item_type',
-                        'estimated_price_mid',
+                        'price_mid',
                     ],
                 ],
             ])
-            ->assertJsonPath('data.lens_results', [])
+            ->assertJsonPath('data.all_products', [])
             ->assertJsonPath('data.input_image_public_url', 'https://example.test/storage/lens/x.jpg');
 
         $id = $response->json('data.lens_result_id');

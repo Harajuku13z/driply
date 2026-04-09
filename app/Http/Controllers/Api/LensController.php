@@ -13,8 +13,7 @@ use App\Models\LensResult;
 use App\Models\Outfit;
 use App\Models\User;
 use App\Services\GoogleLensService;
-use App\Services\LensShoppingEnrichmentService;
-use App\Services\PriceAnalysisService;
+use App\Services\LensImagePriceSearchService;
 use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,7 +28,7 @@ class LensController extends Controller
 {
     use ApiResponses;
 
-    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, LensShoppingEnrichmentService $lensShopping, PriceAnalysisService $prices): JsonResponse
+    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, LensImagePriceSearchService $lensSearch): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -53,61 +52,34 @@ class LensController extends Controller
                 $inputPath = $stored;
             }
 
-            $imageForSerp = $lens->absolutePublicUrlForStoredPath($inputPath);
-            if (str_contains($imageForSerp, 'localhost') || str_contains($imageForSerp, '127.0.0.1')) {
+            $inputPreviewUrl = $lens->absolutePublicUrlForStoredPath($inputPath);
+            if (str_contains($inputPreviewUrl, 'localhost') || str_contains($inputPreviewUrl, '127.0.0.1')) {
                 Log::warning('driply.lens_image_public_url_not_reachable', [
                     'hint' => 'Définir APP_URL ou DRIPLY_LENS_PUBLIC_STORAGE_BASE_URL en HTTPS pour SerpAPI Google Lens.',
-                    'url' => $imageForSerp,
+                    'url' => $inputPreviewUrl,
                 ]);
             }
 
-            $raw = $lens->analyzeImage($inputPath);
-            $topN = (int) config('driply.lens.top_visual_matches', 4);
-            $minRows = (int) config('driply.lens.minimum_rows', 3);
-            $products = $lens->extractTopMatchesWithFallback($raw, $topN, false);
-            $enriched = $lensShopping->enrich($products);
-            $enriched = $lensShopping->ensureMinimumDepth($enriched, $raw, $minRows);
-
-            $filteredLensResults = array_values(array_map(function (array $p) {
-                return [
-                    'title' => (string) ($p['title'] ?? ''),
-                    'source' => (string) ($p['source'] ?? ''),
-                    'thumbnail_url' => (string) ($p['thumbnail_url'] ?? ''),
-                    'image_url' => (string) ($p['image_url'] ?? ''),
-                    'product_url' => (string) ($p['product_url'] ?? ''),
-                    'price_found' => $p['price_found'] ?? null,
-                    'currency_found' => $p['currency_found'] ?? null,
-                    'shopping_offers' => array_values(array_map(static function (array $o): array {
-                        return [
-                            'title' => (string) ($o['title'] ?? ''),
-                            'link' => (string) ($o['link'] ?? ''),
-                            'source' => (string) ($o['source'] ?? ''),
-                            'thumbnail_url' => (string) ($o['thumbnail_url'] ?? ''),
-                            'price' => $o['price'] ?? null,
-                            'extracted_price' => $o['extracted_price'] ?? null,
-                            'currency' => $o['currency'] ?? null,
-                        ];
-                    }, $p['shopping_offers'] ?? [])),
-                ];
-            }, $enriched));
-
-            $analysis = $prices->analyzeFromLensResults($enriched, $currency);
-            $inputPreviewUrl = $lens->absolutePublicUrlForStoredPath($inputPath);
+            $payload = $lensSearch->searchAndAnalyze($inputPreviewUrl, $currency);
+            $allProducts = $payload['all_products'];
+            $priceAnalysis = $payload['price_analysis'];
+            $top3 = $payload['top_3'];
 
             $record = LensResult::query()->create([
                 'user_id' => $user->id,
                 'input_image_url' => $inputPath,
-                'lens_products' => $filteredLensResults,
-                'price_analysis' => $analysis,
+                'lens_products' => $allProducts,
+                'price_analysis' => $priceAnalysis,
                 'currency' => $currency,
             ]);
 
             return $this->created([
                 'lens_result_id' => $record->id,
                 'input_image_public_url' => $inputPreviewUrl,
-                'lens_results' => $filteredLensResults,
-                'price_analysis' => $analysis,
-            ], 'Lens analysis complete');
+                'all_products' => $allProducts,
+                'price_analysis' => $priceAnalysis,
+                'top_3' => $top3,
+            ], 'Analyse terminée');
         } catch (ExternalServiceException $e) {
             return $this->error($e->getMessage(), Response::HTTP_BAD_GATEWAY);
         }
@@ -155,7 +127,7 @@ class LensController extends Controller
         $result->save();
 
         $analysis = is_array($result->price_analysis) ? $result->price_analysis : [];
-        $mid = $analysis['estimated_price_mid'] ?? null;
+        $mid = $analysis['price_mid'] ?? $analysis['estimated_price_mid'] ?? null;
 
         if ($outfit->price === null && is_numeric($mid)) {
             $outfit->price = $mid;

@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Models\User;
 use App\Services\FastServerService;
 use App\Services\GoogleLensService;
+use App\Services\LensImagePriceSearchService;
 use App\Services\LensShoppingEnrichmentService;
 use App\Services\PHashService;
 use App\Services\PriceAnalysisService;
@@ -33,6 +34,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SerpApiService::class);
         $this->app->singleton(GoogleLensService::class);
         $this->app->singleton(LensShoppingEnrichmentService::class);
+        $this->app->singleton(LensImagePriceSearchService::class);
         $this->app->singleton(PriceAnalysisService::class);
         $this->app->singleton(FastServerService::class);
         $this->app->singleton(PHashService::class);

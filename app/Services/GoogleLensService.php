@@ -19,8 +19,10 @@ class GoogleLensService
     public function analyzeImage(string $imagePathOrUrl): array
     {
         $url = $this->toPublicUrl($imagePathOrUrl);
+        $hl = (string) config('driply.lens.shopping_hl', 'fr');
+        $gl = (string) config('driply.lens.shopping_gl', 'fr');
 
-        return $this->serpApi->rawLensResponse($url);
+        return $this->serpApi->rawLensResponse($url, $hl, $gl);
     }
 
     /**

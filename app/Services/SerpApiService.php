@@ -105,19 +105,27 @@ class SerpApiService
     /**
      * @return array<string, mixed>
      */
-    public function rawLensResponse(string $imagePublicUrl): array
+    public function rawLensResponse(string $imagePublicUrl, ?string $hl = null, ?string $gl = null): array
     {
         $this->assertKey();
         $sanitized = $this->sanitizeRemoteUrl($imagePublicUrl);
 
+        $params = [
+            'engine' => 'google_lens',
+            'url' => $sanitized,
+            'api_key' => $this->apiKey,
+        ];
+        if ($hl !== null && $hl !== '') {
+            $params['hl'] = $hl;
+        }
+        if ($gl !== null && $gl !== '') {
+            $params['gl'] = $gl;
+        }
+
         try {
             $response = Http::timeout(90)
                 ->acceptJson()
-                ->get($this->baseUrl.'/search', [
-                    'engine' => 'google_lens',
-                    'url' => $sanitized,
-                    'api_key' => $this->apiKey,
-                ])
+                ->get($this->baseUrl.'/search', $params)
                 ->throw();
         } catch (RequestException $e) {
             throw new ExternalServiceException('SerpAPI Google Lens failed: '.$e->getMessage(), 0, $e);
@@ -228,6 +236,43 @@ class SerpApiService
             'price' => $priceStr,
             'extracted_price' => $extracted,
             'currency' => $currency,
+        ];
+    }
+
+    /**
+     * Catalogue unifié pour l’API Driply (thumbnail, pas thumbnail_url).
+     *
+     * @param  array<string, mixed>  $row  Ligne brute SerpAPI (Lens shopping_results ou google_shopping).
+     * @return array<string, mixed>|null
+     */
+    public function catalogProductFromSerpRow(array $row): ?array
+    {
+        $normalized = $this->parseShoppingResultRow($row);
+        if ($normalized === null) {
+            return null;
+        }
+        $link = $normalized['link'];
+        if ($link === '') {
+            return null;
+        }
+
+        $rating = $row['rating'] ?? null;
+        $reviews = $row['reviews'] ?? $row['reviews_count'] ?? null;
+        $currency = $normalized['currency'] ?? 'EUR';
+        if ($currency === null || $currency === '') {
+            $currency = 'EUR';
+        }
+
+        return [
+            'title' => $normalized['title'] !== '' ? $normalized['title'] : 'Sans titre',
+            'price' => $normalized['price'],
+            'extracted_price' => $normalized['extracted_price'],
+            'currency' => is_scalar($currency) ? (string) $currency : 'EUR',
+            'source' => $normalized['source'] !== '' ? $normalized['source'] : null,
+            'link' => $link,
+            'thumbnail' => $normalized['thumbnail_url'] !== '' ? $normalized['thumbnail_url'] : null,
+            'rating' => is_numeric($rating) ? $rating + 0 : null,
+            'reviews' => is_numeric($reviews) ? (int) $reviews : null,
         ];
     }
 
