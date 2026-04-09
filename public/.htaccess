@@ -5,6 +5,9 @@
 
     RewriteEngine On
 
+    # Hostinger / sous-dossier : décommente et adapte si les routes renvoient 404
+    # RewriteBase /
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
