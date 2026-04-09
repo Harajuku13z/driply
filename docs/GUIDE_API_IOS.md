@@ -115,17 +115,40 @@ La liste complète des routes est dans `routes/api.php` du dépôt.
 
 ---
 
-## Mot de passe oublié (e-mail + page web)
+## Mot de passe oublié — procédure (application **ou** site web)
 
-1. L’app appelle **`POST /api/forgot-password`** avec `{ "email": "…" }` (réponse JSON, voir ci-dessous).
-2. Laravel envoie un e-mail dont le bouton pointe vers une **route web** nommée **`password.reset`** (obligatoire pour le framework) :
-   - **`GET {APP_URL}/reset-password/{token}?email=…`**
-3. L’utilisateur saisit le nouveau mot de passe sur cette page (thème Driply), puis **`POST {APP_URL}/reset-password`** (formulaire, jeton CSRF).
-4. À la fin, redirection vers **`GET /reset-password/success`** avec un lien **« Ouvrir l’application »** (`DRIPLY_IOS_OPEN_APP_AFTER_PASSWORD_RESET` dans `.env`, défaut `driply://`).
+Les deux chemins envoient le **même type d’e-mail** (lien sécurisé). La réinitialisation du mot de passe se fait **dans le navigateur** (page Driply), pas dans l’écran de login de l’app.
 
-Pour les clients qui réinitialisent **sans navigateur** (ex. intégration future), l’API **`POST /api/reset-password`** accepte toujours le JSON : `token`, `email`, `password`, `password_confirmation`.
+### Depuis l’application iOS
 
-**Configuration** : `APP_URL` doit être l’URL publique exacte du site (comme pour la vérification e-mail), sinon le lien dans l’e-mail sera incorrect.
+1. Écran **Connexion** → tente de te connecter ou utilise directement **« Mot de passe oublié ? »** (affiché après une erreur d’identifiants).
+2. Saisis l’**e-mail exact** du compte → **Envoyer le lien**.
+3. Ouvre l’**e-mail** sur le téléphone (ou un ordinateur), appuie sur le bouton du message.
+4. Le lien ouvre **`{APP_URL}/reset-password/{token}?email=…`** : choisis le **nouveau mot de passe** deux fois, valide.
+5. Retour dans l’app **Connexion** avec le nouveau mot de passe.
+
+### Depuis le site (sans passer par l’app)
+
+1. Ouvre **`{APP_URL}/mot-de-passe-oublie`** (ex. `https://driplyapp.fr/mot-de-passe-oublie`), aussi lié depuis la page d’accueil du projet.
+2. Même suite : e-mail → lien → formulaire **`/reset-password/…`** → succès.
+
+### Endpoints techniques
+
+| Action | Où |
+|--------|-----|
+| Demander l’e-mail | **`POST /api/forgot-password`** (JSON `{ "email": "…" }`) ou **formulaire web** `POST /mot-de-passe-oublie` |
+| Lien dans l’e-mail | **`GET {APP_URL}/reset-password/{token}?email=…`** (route Laravel `password.reset`) |
+| Enregistrer le nouveau mot de passe | **`POST {APP_URL}/reset-password`** (formulaire navigateur) ou **`POST /api/reset-password`** (JSON : `token`, `email`, `password`, `password_confirmation`) |
+| Page succès | **`GET /reset-password/success`** (bouton *Ouvrir l’application* : `DRIPLY_IOS_OPEN_APP_AFTER_PASSWORD_RESET`, défaut `driply://`) |
+
+**Réponses API `POST /forgot-password`** : `200` + message si l’e-mail est parti ; **`422`** si l’adresse ne correspond à **aucun compte** (message du type *« Nous ne trouvons aucun compte… »* en français) ou si l’envoi est **temporise** (trop de demandes).
+
+### Si tu ne reçois pas l’e-mail
+
+1. **`/api-verif`** : la ligne **Envoi d’e-mails (MAIL_MAILER)** doit être **`smtp`** en production. Si tu vois **`MAIL_MAILER=log`**, **aucun mail réel n’est envoyé** (Laravel écrit seulement dans `storage/logs`) — il faut configurer SMTP (voir section Hostinger ci‑dessous).
+2. Vérifie **`APP_URL`** : même domaine que l’API publique, sinon les liens dans le mail sont faux ou cassés.
+3. Boîte **spam / promotions**, orthographe de l’e‑mail, et que le compte existe bien (sinon **422** côté API).
+4. Sur le serveur, après une demande, consulte **`storage/logs/laravel.log`** : une ligne `driply.password_reset_request` indique le **statut** Laravel (`passwords.sent`, `passwords.user`, etc.) et le **mailer** utilisé.
 
 ---
 

@@ -116,6 +116,7 @@
                 <ul class="features">
                     <li>Auth e-mail + vérification, jetons Bearer</li>
                     <li>REST JSON sous le préfixe <code style="background:#334155;padding:0.1rem 0.35rem;border-radius:0.25rem;color:var(--text);">/api</code></li>
+                    <li><a href="{{ url('/mot-de-passe-oublie') }}" style="color:var(--accent);">Mot de passe oublié</a> (lien par e-mail, même flux que dans l’app)</li>
                     <li>Santé infra : <a href="{{ url('/api-verif') }}" style="color:var(--accent);">{{ url('/api-verif') }}</a></li>
                 </ul>
             </div>

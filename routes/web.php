@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\ApiVerifController;
+use App\Http\Controllers\ForgotPasswordWebController;
 use App\Http\Controllers\Legacy\LegacyHostingerUploadController;
 use App\Http\Controllers\Legacy\LegacySyncMediaController;
 use App\Http\Controllers\OpenApiController;
@@ -12,6 +13,12 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home');
+
+// Demande de lien (e-mail) — même effet que POST /api/forgot-password.
+Route::get('/mot-de-passe-oublie', [ForgotPasswordWebController::class, 'show'])
+    ->name('password.request');
+Route::post('/mot-de-passe-oublie', [ForgotPasswordWebController::class, 'send'])
+    ->name('password.email');
 
 // Déclarer /reset-password/success avant /reset-password/{token} (évite que « success » soit pris pour un token).
 Route::get('/reset-password/success', [PasswordResetWebController::class, 'success'])

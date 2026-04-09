@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -199,6 +200,12 @@ class AuthController extends Controller
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
         $status = Password::sendResetLink($request->only('email'));
+
+        Log::info('driply.password_reset_request', [
+            'channel' => 'api',
+            'status' => $status,
+            'mailer' => config('mail.default'),
+        ]);
 
         if ($status !== Password::RESET_LINK_SENT) {
             return $this->error(__($status), Response::HTTP_UNPROCESSABLE_ENTITY);

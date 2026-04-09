@@ -64,4 +64,11 @@ class PasswordResetWebTest extends TestCase
             ->assertOk()
             ->assertSeeText('Mot de passe mis à jour', false);
     }
+
+    public function test_forgot_password_web_page_loads(): void
+    {
+        $this->get(route('password.request'))
+            ->assertOk()
+            ->assertSeeText('Réinitialiser le mot de passe', false);
+    }
 }

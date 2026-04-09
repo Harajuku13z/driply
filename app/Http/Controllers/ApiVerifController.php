@@ -87,6 +87,14 @@ class ApiVerifController extends Controller
         }
 
         try {
+            $hasPwdReset = Schema::hasTable('password_reset_tokens');
+            $out[] = $this->check('password_reset_tokens', 'Table jetons reset mot de passe', $hasPwdReset ? 'ok' : 'fail',
+                $hasPwdReset ? 'existe' : 'manquante — php artisan migrate');
+        } catch (Throwable $e) {
+            $out[] = $this->check('password_reset_tokens', 'Table jetons reset mot de passe', 'fail', $e->getMessage());
+        }
+
+        try {
             $hasTokens = Schema::hasTable('personal_access_tokens');
             $out[] = $this->check('sanctum', 'Table Sanctum (`personal_access_tokens`)', $hasTokens ? 'ok' : 'fail',
                 $hasTokens ? 'ok' : 'manquante');
