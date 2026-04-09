@@ -28,6 +28,11 @@ return [
     'ios_open_app_url' => env('DRIPLY_IOS_OPEN_APP_URL', 'driply://email-verified'),
 
     /*
+    | Après réinitialisation du mot de passe sur le site (formulaire web).
+    */
+    'ios_open_app_after_password_reset_url' => env('DRIPLY_IOS_OPEN_APP_AFTER_PASSWORD_RESET', 'driply://'),
+
+    /*
     | Import médias réseaux : backend custom POST /media/fetch, ou FastSaverAPI
     | (FASTSERVER_URL hôte fastsaverapi.com → GET /get-info + token en query).
     */

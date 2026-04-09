@@ -133,6 +133,36 @@
         .btn-open-app:active {
             filter: brightness(0.95);
         }
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-bottom: 0.35rem;
+            font-weight: 500;
+        }
+        .field { margin-bottom: 1rem; }
+        input[type="email"], input[type="password"], input[type="text"] {
+            width: 100%;
+            padding: 0.75rem 0.9rem;
+            font-size: 1rem;
+            border-radius: 0.6rem;
+            border: 1px solid var(--stroke);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text);
+        }
+        input:focus {
+            outline: none;
+            border-color: rgba(123, 97, 255, 0.5);
+            box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.15);
+        }
+        .error-msg {
+            color: #ff7a8a;
+            font-size: 0.85rem;
+            margin-top: 0.35rem;
+        }
+        button.btn-open-app {
+            font-family: inherit;
+        }
     </style>
 </head>
 <body>

@@ -4,6 +4,10 @@ info:
   description: |
     API REST Driply (Laravel + Sanctum). Authentification Bearer sur les routes protégées.
     Enveloppe JSON typique : `{ "success", "data", "message", "meta" }`.
+
+    **Réinitialisation mot de passe :** après `POST /forgot-password`, l’e-mail contient un lien **web**
+    `GET {APP_URL}/reset-password/{token}?email=…` (route Laravel `password.reset`), puis formulaire `POST {APP_URL}/reset-password`.
+    L’endpoint JSON `POST /reset-password` reste disponible pour un flux entièrement API. Voir aussi `/docs/guide-ios`.
   version: 1.0.0
   contact:
     name: Driply
@@ -94,6 +98,9 @@ paths:
     post:
       tags: [Auth]
       summary: Demande de lien reset mot de passe
+      description: |
+        Envoie un e-mail avec un lien vers la page web `/reset-password/{token}?email=…` (hors préfixe `/api`).
+        Nécessite que `APP_URL` soit correct en production.
       requestBody:
         content:
           application/json:
@@ -109,6 +116,9 @@ paths:
     post:
       tags: [Auth]
       summary: Réinitialiser le mot de passe (token + e-mail)
+      description: |
+        Corps JSON `token`, `email`, `password`, `password_confirmation` (même jeton que dans l’e-mail).
+        Les utilisateurs qui ouvrent le lien dans l’e-mail utilisent en général le formulaire web sur `POST /reset-password` (sans préfixe `/api`).
       requestBody:
         content:
           application/json:

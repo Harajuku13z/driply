@@ -6,11 +6,23 @@ use App\Http\Controllers\ApiVerifController;
 use App\Http\Controllers\Legacy\LegacyHostingerUploadController;
 use App\Http\Controllers\Legacy\LegacySyncMediaController;
 use App\Http\Controllers\OpenApiController;
+use App\Http\Controllers\PasswordResetWebController;
 use App\Http\Controllers\SignedMediaController;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home');
+
+// Déclarer /reset-password/success avant /reset-password/{token} (évite que « success » soit pris pour un token).
+Route::get('/reset-password/success', [PasswordResetWebController::class, 'success'])
+    ->name('password.reset.success');
+
+// Lien généré par Illuminate\Auth\Notifications\ResetPassword (route nommée obligatoire).
+Route::get('/reset-password/{token}', [PasswordResetWebController::class, 'show'])
+    ->name('password.reset');
+
+Route::post('/reset-password', [PasswordResetWebController::class, 'submit'])
+    ->name('password.web.submit');
 
 Route::view('/docs', 'docs.redoc')->name('docs');
 
