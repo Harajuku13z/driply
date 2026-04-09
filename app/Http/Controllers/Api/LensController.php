@@ -64,6 +64,12 @@ class LensController extends Controller
             $allProducts = $payload['all_products'];
             $priceAnalysis = $payload['price_analysis'];
             $top3 = $payload['top_3'];
+            $topResults = $payload['top_results'];
+            $queryUsed = $payload['query_used'];
+            $itemDetected = $payload['item_detected'];
+            $brand = $payload['brand'];
+            $color = $payload['color'];
+            $priceSummary = $payload['price_summary'];
 
             $record = LensResult::query()->create([
                 'user_id' => $user->id,
@@ -76,6 +82,12 @@ class LensController extends Controller
             return $this->created([
                 'lens_result_id' => $record->id,
                 'input_image_public_url' => $inputPreviewUrl,
+                'query_used' => $queryUsed,
+                'item_detected' => $itemDetected,
+                'brand' => $brand,
+                'color' => $color,
+                'price_summary' => $priceSummary,
+                'top_results' => $topResults,
                 'all_products' => $allProducts,
                 'price_analysis' => $priceAnalysis,
                 'top_3' => $top3,

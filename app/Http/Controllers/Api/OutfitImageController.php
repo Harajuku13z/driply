@@ -13,8 +13,11 @@ use App\Models\Outfit;
 use App\Models\OutfitImage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Throwable;
 
 class OutfitImageController extends Controller
 {
@@ -27,23 +30,71 @@ class OutfitImageController extends Controller
             abort(403);
         }
 
-        $request->validate([
-            'images' => ['required', 'array', 'min:1'],
-            'images.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
-        ]);
+        $hasFileUpload = $request->hasFile('images');
+        $hasUrl = $request->filled('image_url');
+
+        if ($hasUrl && $hasFileUpload) {
+            return $this->error('Envoyer soit image_url soit images, pas les deux.', 422);
+        }
+
+        if (! $hasUrl && ! $hasFileUpload) {
+            $request->validate([
+                'images' => ['required', 'array', 'min:1'],
+            ]);
+        }
 
         $hasPrimary = $outfit->images()->where('is_primary', true)->exists();
-
         $created = [];
-        foreach ($request->file('images', []) as $idx => $file) {
-            $path = 'outfits/'.Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
-            Storage::disk('public')->put($path, (string) file_get_contents($file->getRealPath()));
+
+        if ($hasUrl) {
+            $data = $request->validate([
+                'image_url' => ['required', 'url', 'max:2048'],
+                'source' => ['nullable', 'string', Rule::enum(OutfitImageSource::class)],
+            ]);
+
+            $remote = trim((string) $data['image_url']);
+            try {
+                $binary = Http::timeout(60)
+                    ->withHeaders(['User-Agent' => 'Driply/1.0'])
+                    ->get($remote)
+                    ->throw()
+                    ->body();
+            } catch (Throwable $e) {
+                return $this->error('Impossible de télécharger l’image : '.$e->getMessage(), 422);
+            }
+
+            if ($binary === '') {
+                return $this->error('Image distante vide.', 422);
+            }
+
+            $path = 'outfits/'.Str::uuid()->toString().'.jpg';
+            Storage::disk('public')->put($path, $binary);
+
+            $source = isset($data['source'])
+                ? OutfitImageSource::from($data['source'])
+                : OutfitImageSource::GoogleLens;
 
             $created[] = $outfit->images()->create([
                 'url' => $path,
-                'source' => OutfitImageSource::Upload,
-                'is_primary' => ! $hasPrimary && $idx === 0,
+                'source' => $source,
+                'is_primary' => ! $hasPrimary,
             ]);
+        } else {
+            $request->validate([
+                'images' => ['required', 'array', 'min:1'],
+                'images.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
+            ]);
+
+            foreach ($request->file('images', []) as $idx => $file) {
+                $path = 'outfits/'.Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
+                Storage::disk('public')->put($path, (string) file_get_contents($file->getRealPath()));
+
+                $created[] = $outfit->images()->create([
+                    'url' => $path,
+                    'source' => OutfitImageSource::Upload,
+                    'is_primary' => ! $hasPrimary && $idx === 0,
+                ]);
+            }
         }
 
         $outfit->load(['images', 'tagModels']);

@@ -11,6 +11,7 @@ return [
     'serpapi' => [
         'key' => env('SERPAPI_KEY'),
         'base_url' => 'https://serpapi.com',
+        'no_cache' => filter_var(env('SERPAPI_NO_CACHE', true), FILTER_VALIDATE_BOOL),
     ],
     'openai' => [
         'key' => env('OPENAI_API_KEY'),
@@ -37,6 +38,11 @@ return [
         | Mettre false uniquement si `php artisan storage:link` fonctionne et /storage/ est public.
         */
         'use_public_file_route' => filter_var(env('DRIPLY_LENS_USE_PUBLIC_FILE_ROUTE', true), FILTER_VALIDATE_BOOL),
+        /*
+        | Si shopping_results (Lens) a moins de N entrées, appel GPT-4o vision pour affiner la requête Shopping.
+        */
+        'vision_shopping_threshold' => max(1, min(10, (int) env('DRIPLY_LENS_VISION_SHOPPING_THRESHOLD', 3))),
+        'shopping_fetch_limit' => max(5, min(40, (int) env('DRIPLY_LENS_SHOPPING_FETCH', 20))),
     ],
     /*
     | App iOS (Hostinger legacy) : upload.php + api/sync_media.php avec en-tête X-Driply-Key.

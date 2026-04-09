@@ -18,7 +18,7 @@ class PriceAnalysisService
      * @param  array<int, array<string, mixed>>  $products
      * @return array<string, mixed>
      */
-    public function analyzeLensProductList(array $products, string $currency = 'EUR'): array
+    public function analyzeLensProductList(array $products, string $currency = 'EUR', string $searchQueryUsed = ''): array
     {
         $key = (string) config('driply.openai.key', '');
         if ($key === '') {
@@ -27,38 +27,55 @@ class PriceAnalysisService
 
         $model = (string) config('driply.openai.model', 'gpt-4o');
         $listJson = json_encode($products, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $queryLine = $searchQueryUsed !== '' ? $searchQueryUsed : '(déduite des titres produits)';
+        $queryJson = json_encode($queryLine, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 
         $prompt = <<<PROMPT
-Tu es un expert en mode et en valorisation de vêtements.
+Tu es un expert en mode et pricing de vêtements.
 
-Voici une liste de produits similaires trouvés sur Internet (Google Lens / Google Shopping) :
+Article recherché (requête Shopping utilisée) : {$queryJson}
+
+Produits agrégés (Google Lens / Google Shopping), triés par prix croissant — chaque domaine marchand n’apparaît qu’une fois :
 {$listJson}
 
-Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après, sans markdown, sans backticks. Structure exacte :
+RÈGLES :
+- Chaque entrée de top_results doit avoir un lien différent (hôtes différents).
+- Ne garde que les offres qui correspondent vraiment au même article (type, couleur, coupe). Écarte couleurs ou modèles manifestement différents.
+- Entre 3 et 5 entrées dans top_results lorsque possible.
+
+Réponds UNIQUEMENT avec un JSON valide UTF-8 (sans markdown ni backticks). Structure exacte :
 {
-  "item_type": "type de vêtement identifié",
-  "style": "style identifié",
-  "color": "couleur principale",
-  "price_low": nombre (prix le plus bas trouvé en {$currency}),
-  "price_mid": nombre (prix médian réaliste en {$currency}),
-  "price_high": nombre (prix le plus élevé trouvé en {$currency}),
-  "suggested_resale_price": nombre (prix conseillé pour revente en {$currency}),
+  "item_identified": "description précise de l'article détecté",
+  "brand": "marque si identifiée ou null",
+  "color": "couleur exacte",
+  "item_type": "type de vêtement",
+  "style": "style (streetwear, casual, etc.)",
+  "search_query_used": "…",
   "currency": "{$currency}",
   "confidence": "low | medium | high",
-  "explanation": "2-3 phrases en français expliquant la fourchette de prix",
-  "sources_analyzed": nombre d'articles de la liste pris en compte,
-  "top_3_picks": [
+  "price_summary": {
+    "lowest": nombre,
+    "average": nombre,
+    "highest": nombre
+  },
+  "explanation": "2 phrases en français sur la fourchette de prix et la variété des offres",
+  "top_results": [
     {
-      "title": "nom du produit",
+      "rank_label": "Meilleur prix | Prix moyen | Premium | Bon plan | Prix élevé",
+      "title": "titre du produit",
       "price": nombre,
-      "link": "url d'achat",
-      "source": "nom du site",
-      "thumbnail": "url image"
+      "price_formatted": "ex: 49,99 €",
+      "source": "nom du site ou domaine",
+      "link": "url unique",
+      "thumbnail": "url image ou chaîne vide",
+      "why_selected": "une courte phrase"
     }
   ]
 }
 
-Les top_3_picks doivent être les 3 meilleurs articles de la liste (pertinence / rapport qualité-prix). Reprends les champs link et thumbnail depuis la liste quand c'est possible.
+Attribution rank_label : le moins cher pertinent → "Meilleur prix" ; le plus cher pertinent → "Premium" ; milieu → "Prix moyen" ; bonne note/avis → "Bon plan" si pertinent.
+
+Le champ search_query_used doit être exactement cette chaîne JSON : {$queryJson}
 PROMPT;
 
         try {
@@ -68,10 +85,10 @@ PROMPT;
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
                     'messages' => [
-                        ['role' => 'system', 'content' => 'Tu es un expert en mode et pricing. Tu réponds toujours en JSON valide uniquement, sans markdown.'],
+                        ['role' => 'system', 'content' => 'Tu es un expert mode et pricing. Tu réponds toujours en JSON valide uniquement, sans markdown ni texte hors JSON.'],
                         ['role' => 'user', 'content' => $prompt],
                     ],
-                    'temperature' => 0.3,
+                    'temperature' => 0.1,
                     'response_format' => ['type' => 'json_object'],
                 ])
                 ->throw();
@@ -94,9 +111,103 @@ PROMPT;
             throw new ExternalServiceException('OpenAI returned non-JSON content');
         }
 
-        $this->assertLensListAnalysisShape($decoded);
+        $this->assertLensV2AnalysisShape($decoded);
 
-        return $this->applyLensListNumericFixups($decoded, $products);
+        $merged = $this->mergeLensV2WithLegacyFields($decoded, $searchQueryUsed, $products);
+
+        $this->assertLensListAnalysisShape($merged);
+
+        return $this->applyLensListNumericFixups($merged, $products);
+    }
+
+    /**
+     * @param  array<string, mixed>  $v2
+     * @param  array<int, array<string, mixed>>  $products
+     * @return array<string, mixed>
+     */
+    private function mergeLensV2WithLegacyFields(array $v2, string $searchQueryUsed, array $products): array
+    {
+        $summary = is_array($v2['price_summary'] ?? null) ? $v2['price_summary'] : [];
+        $low = isset($summary['lowest']) && is_numeric($summary['lowest']) ? (float) $summary['lowest'] : 0.0;
+        $avg = isset($summary['average']) && is_numeric($summary['average']) ? (float) $summary['average'] : 0.0;
+        $high = isset($summary['highest']) && is_numeric($summary['highest']) ? (float) $summary['highest'] : 0.0;
+
+        $topResults = is_array($v2['top_results'] ?? null) ? $v2['top_results'] : [];
+        $pickRows = [];
+        $seenLinks = [];
+        foreach ($topResults as $tr) {
+            if (! is_array($tr)) {
+                continue;
+            }
+            $link = (string) ($tr['link'] ?? '');
+            if ($link === '' || isset($seenLinks[$link])) {
+                continue;
+            }
+            $seenLinks[$link] = true;
+            $price = $tr['price'] ?? 0;
+            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $pickRows[] = [
+                'title' => (string) ($tr['title'] ?? 'Sans titre'),
+                'price' => $priceF,
+                'link' => $link,
+                'source' => (string) ($tr['source'] ?? ''),
+                'thumbnail' => (string) ($tr['thumbnail'] ?? ''),
+                'rank_label' => (string) ($tr['rank_label'] ?? ''),
+                'price_formatted' => (string) ($tr['price_formatted'] ?? ''),
+                'why_selected' => (string) ($tr['why_selected'] ?? ''),
+            ];
+            if (count($pickRows) >= 8) {
+                break;
+            }
+        }
+
+        $currency = (string) ($v2['currency'] ?? 'EUR');
+        $avgForResale = $avg > 0 ? $avg : (($low > 0 && $high > 0) ? ($low + $high) / 2 : $low);
+
+        return array_merge($v2, [
+            'item_type' => (string) ($v2['item_type'] ?? $v2['item_identified'] ?? ''),
+            'brand' => array_key_exists('brand', $v2) ? $v2['brand'] : null,
+            'style' => (string) ($v2['style'] ?? 'non déterminé'),
+            'color' => (string) ($v2['color'] ?? ''),
+            'search_query_used' => (string) ($v2['search_query_used'] ?? $searchQueryUsed),
+            'price_low' => $low,
+            'price_mid' => $avg > 0 ? $avg : $low,
+            'price_high' => $high,
+            'currency' => $currency,
+            'confidence' => (string) ($v2['confidence'] ?? 'medium'),
+            'explanation' => (string) ($v2['explanation'] ?? ''),
+            'suggested_resale_price' => round(max(0, $avgForResale * 0.65), 2),
+            'sources_analyzed' => count($products),
+            'top_3_picks' => array_slice($pickRows, 0, 3),
+            'top_results' => $topResults,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function assertLensV2AnalysisShape(array $data): void
+    {
+        $required = [
+            'item_identified',
+            'item_type',
+            'color',
+            'price_summary',
+            'explanation',
+            'top_results',
+            'currency',
+        ];
+        foreach ($required as $key) {
+            if (! array_key_exists($key, $data)) {
+                throw new ExternalServiceException('OpenAI JSON missing key: '.$key);
+            }
+        }
+        if (! is_array($data['price_summary'])) {
+            throw new ExternalServiceException('OpenAI JSON: price_summary must be an object');
+        }
+        if (! is_array($data['top_results'])) {
+            throw new ExternalServiceException('OpenAI JSON: top_results must be an array');
+        }
     }
 
     /**
@@ -201,6 +312,9 @@ PROMPT;
                     'link' => $link,
                     'source' => (string) ($pr['source'] ?? ''),
                     'thumbnail' => (string) ($pr['thumbnail'] ?? ''),
+                    'rank_label' => '',
+                    'price_formatted' => '',
+                    'why_selected' => '',
                 ];
             }
         }
@@ -234,6 +348,9 @@ PROMPT;
             'link' => $link,
             'source' => (string) ($pick['source'] ?? ''),
             'thumbnail' => (string) ($pick['thumbnail'] ?? ''),
+            'rank_label' => (string) ($pick['rank_label'] ?? ''),
+            'price_formatted' => (string) ($pick['price_formatted'] ?? ''),
+            'why_selected' => (string) ($pick['why_selected'] ?? ''),
         ];
     }
 

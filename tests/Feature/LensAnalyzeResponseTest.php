@@ -48,8 +48,21 @@ class LensAnalyzeResponseTest extends TestCase
                     'suggested_resale_price' => 100.0,
                     'sources_analyzed' => 0,
                     'top_3_picks' => [],
+                    'top_results' => [],
+                    'item_identified' => 'Sneakers test',
+                    'search_query_used' => 'sneakers blanc',
                 ],
                 'top_3' => [],
+                'top_results' => [],
+                'query_used' => 'sneakers blanc',
+                'item_detected' => 'Sneakers test',
+                'brand' => null,
+                'color' => 'blanc',
+                'price_summary' => [
+                    'lowest' => 80.0,
+                    'average' => 120.0,
+                    'highest' => 180.0,
+                ],
             ]);
         });
 
@@ -67,6 +80,10 @@ class LensAnalyzeResponseTest extends TestCase
                 'data' => [
                     'lens_result_id',
                     'input_image_public_url',
+                    'query_used',
+                    'item_detected',
+                    'price_summary',
+                    'top_results',
                     'all_products',
                     'top_3',
                     'price_analysis' => [

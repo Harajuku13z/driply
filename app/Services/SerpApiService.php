@@ -121,6 +121,9 @@ class SerpApiService
         if ($gl !== null && $gl !== '') {
             $params['gl'] = $gl;
         }
+        if (config('driply.serpapi.no_cache', true)) {
+            $params['no_cache'] = 'true';
+        }
 
         try {
             $response = Http::timeout(90)
@@ -165,6 +168,9 @@ class SerpApiService
         }
         if ($hl !== null && $hl !== '') {
             $params['hl'] = $hl;
+        }
+        if (config('driply.serpapi.no_cache', true)) {
+            $params['no_cache'] = 'true';
         }
 
         try {
