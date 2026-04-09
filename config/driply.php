@@ -23,9 +23,15 @@ return [
     */
     'lens' => [
         'top_visual_matches' => max(1, min(8, (int) env('DRIPLY_LENS_TOP_MATCHES', 4))),
+        'minimum_rows' => max(1, min(8, (int) env('DRIPLY_LENS_MIN_ROWS', 3))),
         'shopping_offers_per_match' => max(1, min(20, (int) env('DRIPLY_LENS_SHOPPING_OFFERS', 6))),
         'shopping_gl' => env('DRIPLY_SERPAPI_SHOPPING_GL', 'fr'),
         'shopping_hl' => env('DRIPLY_SERPAPI_SHOPPING_HL', 'fr'),
+        /*
+        | URL publique HTTPS de base vers /storage (sans slash final). Obligatoire en prod si APP_URL
+        | est incorrect pour SerpAPI : ex. https://api.driplyapp.fr ou https://driplyapp.fr
+        */
+        'public_storage_base_url' => env('DRIPLY_LENS_PUBLIC_STORAGE_BASE_URL', ''),
     ],
     /*
     | App iOS (Hostinger legacy) : upload.php + api/sync_media.php avec en-tête X-Driply-Key.

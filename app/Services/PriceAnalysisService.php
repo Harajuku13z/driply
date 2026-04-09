@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Exceptions\ExternalServiceException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Throwable;
 
 class PriceAnalysisService
@@ -94,7 +95,89 @@ PROMPT;
 
         $this->assertAnalysisShape($decoded);
 
-        return $decoded;
+        return $this->applyNumericAndLabelFixups($decoded, $lensProducts);
+    }
+
+    /**
+     * Évite item_type « inconnu », prix à 0 € et sources à 0 quand des montants Shopping/Lens existent.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<int, array<string, mixed>>  $lensProducts
+     * @return array<string, mixed>
+     */
+    private function applyNumericAndLabelFixups(array $data, array $lensProducts): array
+    {
+        $nums = [];
+        foreach ($lensProducts as $p) {
+            $pf = $p['price_found'] ?? null;
+            if ($pf !== null && $pf !== '' && is_numeric($pf)) {
+                $nums[] = (float) $pf;
+            }
+            foreach ($p['shopping_offers'] ?? [] as $o) {
+                if (! is_array($o)) {
+                    continue;
+                }
+                if (isset($o['extracted_price']) && is_numeric($o['extracted_price'])) {
+                    $nums[] = (float) $o['extracted_price'];
+                }
+            }
+        }
+
+        if ($nums !== []) {
+            sort($nums);
+            $low = min($nums);
+            $high = max($nums);
+            $mid = $nums[(int) floor((count($nums) - 1) / 2)];
+            $gptMid = (float) ($data['estimated_price_mid'] ?? 0);
+            if ($gptMid < 1.0) {
+                $data['estimated_price_low'] = round(max(0, $low * 0.9), 2);
+                $data['estimated_price_mid'] = round($mid, 2);
+                $data['estimated_price_high'] = round($high * 1.1, 2);
+                $data['suggested_resale_price'] = round(max(0, $mid * 0.65), 2);
+            }
+            $data['sources_analyzed'] = max((int) ($data['sources_analyzed'] ?? 0), count($nums));
+        }
+
+        $badLabels = ['', 'inconnu', 'unknown', 'n/a', 'non renseigné'];
+        $it = Str::lower(trim((string) ($data['item_type'] ?? '')));
+        if (in_array($it, $badLabels, true)) {
+            foreach ($lensProducts as $p) {
+                $t = trim((string) ($p['title'] ?? ''));
+                if ($t !== '') {
+                    $data['item_type'] = Str::limit($t, 140, '');
+                    break;
+                }
+            }
+            foreach ($lensProducts as $p) {
+                foreach ($p['shopping_offers'] ?? [] as $o) {
+                    if (! is_array($o)) {
+                        continue;
+                    }
+                    $t = trim((string) ($o['title'] ?? ''));
+                    if ($t !== '') {
+                        $data['item_type'] = Str::limit($t, 140, '');
+
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        if (in_array(Str::lower(trim((string) ($data['style'] ?? ''))), $badLabels, true)) {
+            $data['style'] = 'non déterminé';
+        }
+        if (in_array(Str::lower(trim((string) ($data['color'] ?? ''))), $badLabels, true)) {
+            $data['color'] = 'non déterminée';
+        }
+
+        if ($nums === [] && (float) ($data['estimated_price_mid'] ?? 0) < 1.0) {
+            $ex = trim((string) ($data['explanation'] ?? ''));
+            if ($ex === '' || Str::contains(Str::lower($ex), ['aucune donnée'])) {
+                $data['explanation'] = 'SerpAPI ou Google Shopping n’a pas renvoyé de prix exploitables. Vérifie APP_URL, `php artisan storage:link`, et DRIPLY_LENS_PUBLIC_STORAGE_BASE_URL (URL HTTPS publique vers ton dossier storage).';
+            }
+        }
+
+        return $data;
     }
 
     /**

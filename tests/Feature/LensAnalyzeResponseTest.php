@@ -30,12 +30,14 @@ class LensAnalyzeResponseTest extends TestCase
         Sanctum::actingAs($user);
 
         $this->mock(GoogleLensService::class, function ($mock): void {
+            $mock->shouldReceive('absolutePublicUrlForStoredPath')->andReturn('https://example.test/storage/lens/x.jpg');
             $mock->shouldReceive('analyzeImage')->once()->andReturn(['visual_matches' => []]);
-            $mock->shouldReceive('extractTopVisualMatches')->once()->andReturn([]);
+            $mock->shouldReceive('extractTopMatchesWithFallback')->once()->andReturn([]);
         });
 
         $this->mock(LensShoppingEnrichmentService::class, function ($mock): void {
             $mock->shouldReceive('enrich')->once()->andReturn([]);
+            $mock->shouldReceive('ensureMinimumDepth')->once()->andReturn([]);
         });
 
         $this->mock(PriceAnalysisService::class, function ($mock): void {
@@ -67,6 +69,7 @@ class LensAnalyzeResponseTest extends TestCase
             ->assertJsonStructure([
                 'data' => [
                     'lens_result_id',
+                    'input_image_public_url',
                     'lens_results',
                     'price_analysis' => [
                         'item_type',
@@ -74,7 +77,8 @@ class LensAnalyzeResponseTest extends TestCase
                     ],
                 ],
             ])
-            ->assertJsonPath('data.lens_results', []);
+            ->assertJsonPath('data.lens_results', [])
+            ->assertJsonPath('data.input_image_public_url', 'https://example.test/storage/lens/x.jpg');
 
         $id = $response->json('data.lens_result_id');
         $this->assertIsString($id);

@@ -19,6 +19,7 @@ use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -52,10 +53,20 @@ class LensController extends Controller
                 $inputPath = $stored;
             }
 
+            $imageForSerp = $lens->absolutePublicUrlForStoredPath($inputPath);
+            if (str_contains($imageForSerp, 'localhost') || str_contains($imageForSerp, '127.0.0.1')) {
+                Log::warning('driply.lens_image_public_url_not_reachable', [
+                    'hint' => 'Définir APP_URL ou DRIPLY_LENS_PUBLIC_STORAGE_BASE_URL en HTTPS pour SerpAPI Google Lens.',
+                    'url' => $imageForSerp,
+                ]);
+            }
+
             $raw = $lens->analyzeImage($inputPath);
             $topN = (int) config('driply.lens.top_visual_matches', 4);
-            $products = $lens->extractTopVisualMatches($raw, $topN);
+            $minRows = (int) config('driply.lens.minimum_rows', 3);
+            $products = $lens->extractTopMatchesWithFallback($raw, $topN, false);
             $enriched = $lensShopping->enrich($products);
+            $enriched = $lensShopping->ensureMinimumDepth($enriched, $raw, $minRows);
 
             $filteredLensResults = array_values(array_map(function (array $p) {
                 return [
@@ -81,6 +92,7 @@ class LensController extends Controller
             }, $enriched));
 
             $analysis = $prices->analyzeFromLensResults($enriched, $currency);
+            $inputPreviewUrl = $lens->absolutePublicUrlForStoredPath($inputPath);
 
             $record = LensResult::query()->create([
                 'user_id' => $user->id,
@@ -92,6 +104,7 @@ class LensController extends Controller
 
             return $this->created([
                 'lens_result_id' => $record->id,
+                'input_image_public_url' => $inputPreviewUrl,
                 'lens_results' => $filteredLensResults,
                 'price_analysis' => $analysis,
             ], 'Lens analysis complete');

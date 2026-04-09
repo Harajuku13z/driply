@@ -55,7 +55,7 @@ class GoogleLensService
     }
 
     /**
-     * Uniquement les N premières correspondances visuelles (ordre Google Lens), pour l’analyse prix.
+     * Uniquement les N premières correspondances visuelles (ordre Google Lens).
      *
      * @return array<int, array<string, mixed>>
      */
@@ -85,10 +85,96 @@ class GoogleLensService
         return $out;
     }
 
+    /**
+     * Correspondances visuelles, puis shopping_results/products Lens, puis knowledge_graph — pour
+     * éviter 0 résultat quand SerpAPI ne renvoie que du shopping ou métadonnées.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function extractTopMatchesWithFallback(array $lensResponse, int $limit, bool $visualOnly = false): array
+    {
+        $out = [];
+        $seen = [];
+
+        $push = function (array $item, string $kind) use (&$out, &$seen, $limit): void {
+            if (count($out) >= $limit) {
+                return;
+            }
+            $n = $this->normalizeLensItem($item, $kind);
+            $key = md5(($n['product_url'] ?? '').'|'.($n['title'] ?? '').'|'.($n['thumbnail_url'] ?? ''));
+            if (isset($seen[$key])) {
+                return;
+            }
+            if (($n['title'] ?? '') === '' && ($n['product_url'] ?? '') === '' && ($n['thumbnail_url'] ?? '') === '' && ($n['image_url'] ?? '') === '') {
+                return;
+            }
+            $seen[$key] = true;
+            $out[] = $n;
+        };
+
+        $visual = $lensResponse['visual_matches'] ?? [];
+        if (is_array($visual)) {
+            $items = array_values(array_filter($visual, fn ($item): bool => is_array($item)));
+            usort($items, function (array $a, array $b): int {
+                $pa = isset($a['position']) ? (int) $a['position'] : 999_999;
+                $pb = isset($b['position']) ? (int) $b['position'] : 999_999;
+
+                return $pa <=> $pb;
+            });
+            foreach ($items as $item) {
+                $push($item, 'visual_match');
+            }
+        }
+
+        if (! $visualOnly && count($out) < $limit) {
+            foreach (['shopping_results', 'products'] as $blockKey) {
+                $block = $lensResponse[$blockKey] ?? [];
+                if (! is_array($block)) {
+                    continue;
+                }
+                foreach ($block as $item) {
+                    if (is_array($item)) {
+                        $push($item, 'lens_embedded_shopping');
+                    }
+                }
+            }
+        }
+
+        if (! $visualOnly && count($out) < $limit) {
+            $kg = $lensResponse['knowledge_graph'] ?? null;
+            if (is_array($kg) && (trim((string) ($kg['title'] ?? '')) !== '' || trim((string) ($kg['image'] ?? '')) !== '')) {
+                $push([
+                    'title' => (string) ($kg['title'] ?? ''),
+                    'source' => (string) ($kg['type'] ?? $kg['subtitle'] ?? ''),
+                    'link' => '',
+                    'thumbnail' => (string) ($kg['thumbnail'] ?? ''),
+                    'image' => (string) ($kg['image'] ?? ''),
+                ], 'knowledge_graph');
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * URL absolue de l’image envoyée à SerpAPI Google Lens (doit être joignable depuis Internet).
+     */
+    public function absolutePublicUrlForStoredPath(string $relativePublicDiskPath): string
+    {
+        return $this->toPublicUrl($relativePublicDiskPath);
+    }
+
     private function toPublicUrl(string $imagePathOrUrl): string
     {
         if (str_starts_with($imagePathOrUrl, 'http://') || str_starts_with($imagePathOrUrl, 'https://')) {
             return $imagePathOrUrl;
+        }
+
+        $base = rtrim((string) config('driply.lens.public_storage_base_url', ''), '/');
+        if ($base !== '') {
+            $path = ltrim($imagePathOrUrl, '/');
+
+            return $base.'/storage/'.$path;
         }
 
         return Storage::disk('public')->url($imagePathOrUrl);
