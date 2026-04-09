@@ -10,6 +10,7 @@ use App\Services\GoogleLensService;
 use App\Services\PHashService;
 use App\Services\PriceAnalysisService;
 use App\Services\SerpApiService;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -65,6 +66,26 @@ class AppServiceProvider extends ServiceProvider
                     'verificationUrl' => $verificationUrl,
                     'userName' => (string) ($notifiable->name ?? ''),
                 ]);
+        });
+
+        ResetPassword::toMailUsing(function (object $notifiable, #[\SensitiveParameter] string $token): MailMessage {
+            /** @var User $notifiable */
+            $resetUrl = url(route('password.reset', [
+                'token' => $token,
+                'email' => $notifiable->getEmailForPasswordReset(),
+            ], absolute: false));
+
+            $guard = (string) config('auth.defaults.passwords', 'users');
+            $expireMinutes = (int) config("auth.passwords.{$guard}.expire", 60);
+
+            return (new MailMessage)
+                ->subject(Lang::get('Reset Password Notification'))
+                ->view('emails.reset-password', [
+                    'resetUrl' => $resetUrl,
+                    'userName' => (string) ($notifiable->name ?? ''),
+                    'expireMinutes' => $expireMinutes,
+                ])
+                ->action(Lang::get('Reset Password'), $resetUrl);
         });
     }
 }
