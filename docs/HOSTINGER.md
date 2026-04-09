@@ -43,6 +43,15 @@ Si tu ne peux pas changer la racine :
 
    Adapte **`driply-api`** au vrai nom du dossier qui contient `vendor` et `bootstrap`.
 
+## E-mails (vérification d’adresse à l’inscription)
+
+Laravel envoie un **lien** dans le mail, pas un code à 6 chiffres. Si tu ne reçois rien :
+
+1. Sur le serveur, dans **`.env`** : `MAIL_MAILER=smtp` (si cette ligne manque ou vaut `log`, aucun mail réel n’est envoyé — tout part dans `storage/logs`).
+2. Renseigne **`MAIL_HOST`**, **`MAIL_USERNAME`**, **`MAIL_PASSWORD`** (SMTP Hostinger, ex. `smtp.hostinger.com`, port **465**, `MAIL_ENCRYPTION=ssl`).
+3. **`APP_URL`** doit être l’URL publique HTTPS du site (ex. `https://driplyapp.fr`) pour que le lien dans l’e-mail soit correct.
+4. Consulte **`/api-verif`** : la ligne « Envoi d’e-mails » doit être verte en production (pas `log`).
+
 ## À vérifier aussi
 
 - **PHP** : 8.2 ou 8.3 (hPanel → PHP avancé).

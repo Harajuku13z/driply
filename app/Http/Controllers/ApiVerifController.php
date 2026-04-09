@@ -124,10 +124,29 @@ class ApiVerifController extends Controller
             $out[] = $this->check('flysystem_public', 'Disque `public`', 'fail', $e->getMessage());
         }
 
+        $mailDriver = (string) config('mail.default', 'log');
         $mailHost = (string) config('mail.mailers.smtp.host', '');
         $mailUser = (string) config('mail.mailers.smtp.username', '');
-        $out[] = $this->check('mail', 'SMTP configuré', ($mailHost !== '' && $mailUser !== '') ? 'ok' : 'warn',
-            $mailHost !== '' ? $mailHost.' (port '.(string) config('mail.mailers.smtp.port').')' : 'MAIL_HOST / USER vides (OK en dev avec log)');
+        $isProd = config('app.env') === 'production';
+
+        if ($mailDriver === 'log') {
+            $out[] = $this->check(
+                'mail_driver',
+                'Envoi d\'e-mails (MAIL_MAILER)',
+                $isProd ? 'fail' : 'warn',
+                'MAIL_MAILER=log : aucun mail réel (vérification compte, etc.) — seulement écrit dans les logs. En production : MAIL_MAILER=smtp + identifiants Hostinger.'
+            );
+        } else {
+            $smtpOk = $mailHost !== '' && $mailUser !== '';
+            $out[] = $this->check(
+                'mail_driver',
+                'Envoi d\'e-mails ('.$mailDriver.')',
+                $smtpOk ? 'ok' : 'warn',
+                $smtpOk
+                    ? $mailHost.' (port '.(string) config('mail.mailers.smtp.port').')'
+                    : 'MAIL_HOST ou MAIL_USERNAME manquant pour SMTP'
+            );
+        }
 
         $out[] = $this->check('queue', 'File d\'attente', 'ok', (string) config('queue.default'));
 
