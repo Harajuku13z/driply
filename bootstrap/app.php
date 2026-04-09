@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
+use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
@@ -43,6 +44,18 @@ return Application::configure(basePath: dirname(__DIR__))
                     'message' => 'Unauthenticated',
                     'errors' => (object) [],
                 ], 401);
+            }
+
+            return null;
+        });
+
+        $exceptions->render(function (InvalidSignatureException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Lien invalide ou expiré.',
+                    'errors' => (object) [],
+                ], 403);
             }
 
             return null;

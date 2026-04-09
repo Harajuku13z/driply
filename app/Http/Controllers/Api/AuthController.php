@@ -13,6 +13,7 @@ use App\Http\Requests\Auth\RegisterRequest;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -38,12 +39,56 @@ class AuthController extends Controller
             'outfits_count' => 0,
         ]);
 
+        $user->sendEmailVerificationNotification();
+
         $token = $user->createToken('mobile')->plainTextToken;
 
         return $this->created([
             'token' => $token,
-            'user' => new UserResource($user),
-        ], 'Registered');
+            'user' => new UserResource($user->fresh()),
+        ], 'Registered. Please verify your email.');
+    }
+
+    /**
+     * Confirme l’e-mail à partir du lien signé envoyé par courriel (aucune session requise).
+     */
+    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse
+    {
+        $user = User::query()->findOrFail($id);
+
+        if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            return $this->error('Lien de vérification invalide.', Response::HTTP_FORBIDDEN);
+        }
+
+        if (! $user->hasVerifiedEmail()) {
+            if (! $user->markEmailAsVerified()) {
+                return $this->error('La vérification a échoué.', Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+            event(new Verified($user));
+        }
+
+        return $this->success([
+            'verified' => true,
+            'user' => new UserResource($user->fresh()),
+        ], 'E-mail vérifié.');
+    }
+
+    /**
+     * Renvoie l’e-mail de vérification (utilisateur connecté via Sanctum).
+     */
+    public function resendVerificationEmail(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return $this->success(['already_verified' => true], 'E-mail déjà vérifié.');
+        }
+
+        $user->sendEmailVerificationNotification();
+
+        return $this->success(null, 'E-mail de vérification envoyé.');
     }
 
     public function login(LoginRequest $request): JsonResponse

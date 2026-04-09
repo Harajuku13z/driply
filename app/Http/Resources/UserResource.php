@@ -29,6 +29,7 @@ class UserResource extends JsonResource
             'plan' => $this->plan instanceof \BackedEnum ? $this->plan->value : $this->plan,
             'currency_preference' => $this->currency_preference,
             'outfits_count' => (int) $this->outfits_count,
+            'email_verified' => $this->email_verified_at !== null,
             'email_verified_at' => $this->email_verified_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\User;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class ApiRegistrationTest extends TestCase
@@ -14,6 +16,8 @@ class ApiRegistrationTest extends TestCase
 
     public function test_register_returns_token_and_user_profile(): void
     {
+        Notification::fake();
+
         $response = $this->postJson('/api/register', [
             'name' => 'Jane',
             'email' => 'jane@example.com',
@@ -23,8 +27,9 @@ class ApiRegistrationTest extends TestCase
 
         $response->assertCreated()
             ->assertJsonPath('success', true)
+            ->assertJsonPath('data.user.email_verified', false)
             ->assertJsonStructure([
-                'data' => ['token', 'user' => ['id', 'email', 'plan', 'outfits_count']],
+                'data' => ['token', 'user' => ['id', 'email', 'plan', 'outfits_count', 'email_verified']],
             ]);
 
         $this->assertDatabaseHas('users', [
@@ -32,5 +37,9 @@ class ApiRegistrationTest extends TestCase
         ]);
 
         $this->assertSame(1, User::query()->count());
+
+        $user = User::query()->where('email', 'jane@example.com')->first();
+        $this->assertNotNull($user);
+        Notification::assertSentTo($user, VerifyEmail::class);
     }
 }
