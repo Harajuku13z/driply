@@ -141,7 +141,7 @@ PROMPT;
                 continue;
             }
             $row = $p;
-            unset($row['color_match']);
+            unset($row['color_match'], $row['color_confirmed']);
             $forPrompt[] = $row;
         }
         $listJson = json_encode($forPrompt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
@@ -150,29 +150,40 @@ PROMPT;
         $brand = (string) ($itemDetails['brand'] ?? '');
         $modelName = (string) ($itemDetails['model'] ?? '');
         $color = (string) ($itemDetails['color_primary'] ?? '');
-        $details = (string) ($itemDetails['details'] ?? '');
+        $hex = (string) ($itemDetails['color_hex'] ?? '');
+        $material = (string) ($itemDetails['material'] ?? '');
+        $cut = (string) ($itemDetails['cut_style'] ?? '');
+        $distinct = (string) ($itemDetails['distinctive_details'] ?? '');
+        $details = $distinct !== '' ? $distinct : (string) ($itemDetails['details'] ?? '');
+        $colorJson = json_encode($color, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
 
         $prompt = <<<PROMPT
-Article identifié avec certitude (vision sur la photo) :
+Tu as analysé une image et identifié cet article avec certitude :
+
+DESCRIPTION EXACTE DE L'ARTICLE :
 - Type     : {$type}
 - Marque   : {$brand}
 - Modèle   : {$modelName}
-- Couleur  : {$color}
+- Couleur  : {$color} (hex: {$hex})
+- Matière  : {$material}
+- Coupe    : {$cut}
 - Détails  : {$details}
 
-Produits trouvés (triés, correspondance couleur indiquée par color_match retirée du JSON — privilégie les titres cohérents avec la couleur "{$color}") :
+Voici les produits trouvés sur Google Shopping (champs color_confirmed exclus) :
 {$listJson}
 
-MISSION :
-1. Garder UNIQUEMENT les produits dont la couleur correspond à "{$color}" lorsque c’est identifiable dans le titre ; si moins de 3 correspondent, garde les plus proches.
-2. Chaque résultat doit avoir un lien différent (domaines différents).
-3. 3 à 5 résultats maximum.
+RÈGLES STRICTES :
+1. Retourne TOUJOURS exactement 3 résultats dans "results", ni plus ni moins.
+2. Chaque résultat doit avoir un lien différent (domaine / hôte différent).
+3. Priorise les titres qui mentionnent la couleur {$colorJson}.
+4. Si moins de 3 ont la bonne couleur, complète avec les plus proches et mets rank_label = "Similaire" pour ces entrées AVANT normalisation serveur (tu peux utiliser Similaire pour toute ligne « proche »).
+5. Après sélection, ordonne les 3 du moins cher au plus cher : résultat 1 = "Meilleur prix", 2 = "Prix moyen", 3 = "Premium" (sauf lignes Similaire que tu dois placer logiquement par prix).
+6. Exclure tout produit sans thumbnail ou sans lien valide.
 
 Réponds UNIQUEMENT avec un JSON valide UTF-8 (sans markdown ni backticks) :
 {
-  "item_confirmed": "description complète de l'article",
+  "item_confirmed": "description complète confirmée",
   "brand": "marque",
-  "model": "modèle",
   "color": "couleur exacte",
   "price_summary": {
     "lowest": nombre,
@@ -182,14 +193,15 @@ Réponds UNIQUEMENT avec un JSON valide UTF-8 (sans markdown ni backticks) :
   "explanation": "2 phrases en français sur la fourchette de prix",
   "results": [
     {
-      "rank_label": "Meilleur prix ou Prix moyen ou Premium ou Bon plan",
-      "title": "titre produit",
-      "price": nombre,
+      "rank_label": "Meilleur prix",
+      "title": "titre",
+      "price": 49.99,
       "price_formatted": "49,99 €",
-      "source": "nom du site",
-      "link": "url d'achat",
-      "thumbnail": "url image",
-      "note": "1 phrase pourquoi ce résultat"
+      "source": "zara.com",
+      "link": "https://...",
+      "thumbnail": "https://...",
+      "color_match": true,
+      "note": "pourquoi ce résultat"
     }
   ]
 }
@@ -202,7 +214,10 @@ PROMPT;
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
                     'messages' => [
-                        ['role' => 'system', 'content' => 'Tu es expert mode et pricing. Tu réponds uniquement en JSON valide, sans markdown.'],
+                        [
+                            'role' => 'system',
+                            'content' => 'Tu es expert mode et pricing. Tu respectes les règles strictes. Tu retournes exactement 3 entrées dans "results". JSON valide uniquement, sans markdown.',
+                        ],
                         ['role' => 'user', 'content' => $prompt],
                     ],
                     'temperature' => 0,
@@ -229,18 +244,21 @@ PROMPT;
         }
 
         $this->assertLensFinalizeShape($decoded);
+        $decoded = $this->normalizeFinalizeToExactlyThreeOffers($decoded, $products);
+
+        if (! is_array($decoded['results'] ?? null) || count($decoded['results']) < 1) {
+            throw new ExternalServiceException('Aucune offre exploitable après analyse.');
+        }
 
         $topResults = [];
-        $seenLinks = [];
-        foreach ($decoded['results'] ?? [] as $r) {
+        foreach ($decoded['results'] as $r) {
             if (! is_array($r)) {
                 continue;
             }
             $link = (string) ($r['link'] ?? '');
-            if ($link === '' || isset($seenLinks[$link])) {
+            if ($link === '') {
                 continue;
             }
-            $seenLinks[$link] = true;
             $price = $r['price'] ?? 0;
             $priceF = is_numeric($price) ? (float) $price : 0.0;
             $topResults[] = [
@@ -252,10 +270,8 @@ PROMPT;
                 'link' => $link,
                 'thumbnail' => (string) ($r['thumbnail'] ?? ''),
                 'why_selected' => (string) ($r['note'] ?? ''),
+                'color_match' => (bool) ($r['color_match'] ?? false),
             ];
-            if (count($topResults) >= 8) {
-                break;
-            }
         }
 
         $summary = is_array($decoded['price_summary'] ?? null) ? $decoded['price_summary'] : [];
@@ -285,6 +301,114 @@ PROMPT;
         $merged['model'] = (string) ($decoded['model'] ?? $modelName);
 
         return $this->applyLensListNumericFixups($merged, $products);
+    }
+
+    /**
+     * Garantit exactement 3 offres (domaines distincts, lien + vignette), labels Meilleur prix / Prix moyen / Premium après tri par prix.
+     *
+     * @param  array<string, mixed>  $decoded
+     * @param  array<int, array<string, mixed>>  $products
+     * @return array<string, mixed>
+     */
+    private function normalizeFinalizeToExactlyThreeOffers(array $decoded, array $products): array
+    {
+        $candidates = [];
+        $seenHosts = [];
+
+        $pushCandidate = function (array $r) use (&$candidates, &$seenHosts): void {
+            $link = trim((string) ($r['link'] ?? ''));
+            $thumb = trim((string) ($r['thumbnail'] ?? ''));
+            if ($link === '' || $thumb === '' || ! filter_var($link, FILTER_VALIDATE_URL)) {
+                return;
+            }
+            $host = $this->normalizeOfferHost($link);
+            if ($host === '' || isset($seenHosts[$host])) {
+                return;
+            }
+            $seenHosts[$host] = true;
+            $price = $r['price'] ?? 0;
+            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $candidates[] = [
+                'rank_label' => (string) ($r['rank_label'] ?? ''),
+                'title' => (string) ($r['title'] ?? 'Sans titre'),
+                'price' => $priceF,
+                'price_formatted' => (string) ($r['price_formatted'] ?? ''),
+                'source' => (string) ($r['source'] ?? ''),
+                'link' => $link,
+                'thumbnail' => $thumb,
+                'color_match' => (bool) ($r['color_match'] ?? false),
+                'note' => (string) ($r['note'] ?? ''),
+            ];
+        };
+
+        foreach ($decoded['results'] ?? [] as $row) {
+            if (is_array($row)) {
+                $pushCandidate($row);
+            }
+        }
+
+        if (count($candidates) < 3) {
+            foreach ($products as $p) {
+                if (count($candidates) >= 3) {
+                    break;
+                }
+                if (! is_array($p)) {
+                    continue;
+                }
+                $link = trim((string) ($p['link'] ?? ''));
+                $thumb = trim((string) ($p['thumbnail'] ?? ''));
+                if ($link === '' || $thumb === '') {
+                    continue;
+                }
+                $host = $this->normalizeOfferHost($link);
+                if ($host === '' || isset($seenHosts[$host])) {
+                    continue;
+                }
+                if (! isset($p['extracted_price']) || ! is_numeric($p['extracted_price'])) {
+                    continue;
+                }
+                $seenHosts[$host] = true;
+                $candidates[] = [
+                    'rank_label' => 'Similaire',
+                    'title' => (string) ($p['title'] ?? 'Sans titre'),
+                    'price' => (float) $p['extracted_price'],
+                    'price_formatted' => '',
+                    'source' => (string) ($p['source'] ?? ''),
+                    'link' => $link,
+                    'thumbnail' => $thumb,
+                    'color_match' => (bool) ($p['color_confirmed'] ?? $p['color_match'] ?? false),
+                    'note' => 'Sélection complémentaire depuis le catalogue (prix croissant).',
+                ];
+            }
+        }
+
+        usort($candidates, fn (array $a, array $b): int => $a['price'] <=> $b['price']);
+        $final = array_slice($candidates, 0, 3);
+        $labels = ['Meilleur prix', 'Prix moyen', 'Premium'];
+        foreach ($final as $i => &$row) {
+            $row['rank_label'] = $labels[min($i, 2)];
+        }
+        unset($row);
+
+        $decoded['results'] = $final;
+        $nums = array_values(array_filter(array_map(fn (array $r): ?float => $r['price'] > 0 ? $r['price'] : null, $final)));
+        if ($nums !== []) {
+            sort($nums);
+            $decoded['price_summary'] = [
+                'lowest' => (float) min($nums),
+                'average' => round(array_sum($nums) / count($nums), 2),
+                'highest' => (float) max($nums),
+            ];
+        }
+
+        return $decoded;
+    }
+
+    private function normalizeOfferHost(string $url): string
+    {
+        $host = strtolower((string) (parse_url($url, PHP_URL_HOST) ?? ''));
+
+        return str_starts_with($host, 'www.') ? substr($host, 4) : $host;
     }
 
     /**

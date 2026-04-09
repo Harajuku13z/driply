@@ -8,11 +8,12 @@ use App\Exceptions\ExternalServiceException;
 use App\Exceptions\LensIdentificationFailedException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * GPT-4o vision : analyse directe du fichier image (data URL base64), sans dépendre d’une URL publique.
+ * GPT-4o vision : lit l’image en base64 (vérité terrain) avant Lens / Shopping.
  */
 class LensImageVisionQueryService
 {
@@ -47,20 +48,23 @@ class LensImageVisionQueryService
         $dataUrl = 'data:'.$mime.';base64,'.$b64;
 
         $userText = <<<'TXT'
-Analyse ce vêtement ou accessoire avec une précision maximale.
+Regarde cette image avec une précision maximale.
+Décris le vêtement ou accessoire visible.
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après, sans markdown, sans backticks.
 
 {
-  "search_query_en": "requête en anglais pour Google Shopping (ex: Levis 501 straight black jeans men)",
-  "search_query_fr": "même requête en français",
-  "brand": "marque exacte visible sur le vêtement ou détectée",
-  "model": "modèle exact si identifiable",
-  "item_type": "type précis",
-  "color_primary": "couleur principale exacte",
-  "color_secondary": "couleur secondaire si présente ou vide",
-  "material": "matière si détectable",
+  "brand": "marque exacte si visible sur le vêtement (logo, étiquette), sinon null",
+  "item_type": "type précis ex: jean droit, sneaker basse, veste bomber, robe midi...",
+  "model": "modèle exact si identifiable ex: 501, Superstar, Air Force 1, sinon null",
+  "color_primary": "couleur principale EXACTE ex: noir, blanc, bleu indigo, beige",
+  "color_secondary": "couleur secondaire si présente, sinon null",
+  "color_hex": "code hex approximatif de la couleur principale ex: #1a1a1a",
+  "material": "matière visible ex: denim, cuir lisse, coton, sinon null",
   "gender": "homme | femme | unisexe",
-  "details": "détails distinctifs",
+  "cut_style": "coupe ou style ex: slim, oversize, crop, regular, bootcut",
+  "distinctive_details": "détails uniques ex: délavé, troué aux genoux, broderie",
+  "search_query_google_en": "requête Google Shopping EN ANGLAIS ultra précise incluant couleur et marque",
+  "search_query_google_fr": "même requête EN FRANÇAIS",
   "confidence": "high | medium | low"
 }
 TXT;
@@ -88,7 +92,7 @@ TXT;
                         ],
                     ],
                     'response_format' => ['type' => 'json_object'],
-                    'max_tokens' => 800,
+                    'max_tokens' => 900,
                 ])
                 ->throw();
         } catch (RequestException $e) {
@@ -100,20 +104,22 @@ TXT;
         $body = $response->json();
         $content = $body['choices'][0]['message']['content'] ?? null;
         if (! is_string($content) || $content === '') {
-            throw new LensIdentificationFailedException('Impossible d\'identifier l\'article. Essaie avec une photo plus nette.');
+            throw new LensIdentificationFailedException('Article non identifiable. Essaie avec une photo plus nette.');
         }
 
         try {
             /** @var array<string, mixed> $decoded */
             $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable) {
-            throw new LensIdentificationFailedException('Impossible d\'identifier l\'article. Essaie avec une photo plus nette.');
+            throw new LensIdentificationFailedException('Article non identifiable. Essaie avec une photo plus nette.');
         }
 
-        $en = trim((string) ($decoded['search_query_en'] ?? ''));
-        if ($en === '') {
-            throw new LensIdentificationFailedException('Impossible d\'identifier l\'article. Essaie avec une photo plus nette.');
+        $itemType = trim((string) ($decoded['item_type'] ?? ''));
+        if ($itemType === '') {
+            throw new LensIdentificationFailedException('Article non identifiable. Essaie avec une photo plus nette.');
         }
+
+        Log::info('lens.gpt_vision_description', ['payload' => $decoded]);
 
         return $decoded;
     }

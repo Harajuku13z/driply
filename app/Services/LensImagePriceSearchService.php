@@ -10,13 +10,36 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * 1) GPT-4o vision sur les octets (base64) → détail article + requêtes Shopping
- * 2) Google Shopping (EN puis FR) + Google Lens (URL publique) → fusion
- * 3) Filtre prix + domaine + hint couleur → tri
- * 4) GPT final → results / price_analysis legacy
+ * 1) GPT-4o vision (base64) → description « vérité »
+ * 2) Google Lens (URL) fusionné en tête des lignes Shopping
+ * 3) Google Shopping EN + FR
+ * 4) Filtre domaine + couleur (priorité équivalentes couleur) → max 12
+ * 5) GPT final → exactement 3 résultats (normalisation côté serveur)
  */
 class LensImagePriceSearchService
 {
+    /**
+     * @return array<string, list<string>>
+     */
+    private static function colorDictionary(): array
+    {
+        return [
+            'noir' => ['black', 'noir', 'dark', 'ebony'],
+            'blanc' => ['white', 'blanc', 'ivory', 'cream', 'off-white'],
+            'bleu' => ['blue', 'bleu', 'navy', 'indigo', 'cobalt', 'denim'],
+            'bleu indigo' => ['indigo', 'blue', 'denim', 'dark blue', 'bleu'],
+            'rouge' => ['red', 'rouge', 'scarlet', 'crimson', 'bordeaux'],
+            'vert' => ['green', 'vert', 'olive', 'khaki', 'emerald', 'forest'],
+            'gris' => ['grey', 'gray', 'gris', 'charcoal', 'silver'],
+            'beige' => ['beige', 'sand', 'cream', 'nude', 'camel', 'tan'],
+            'marron' => ['brown', 'marron', 'camel', 'tan', 'chocolate'],
+            'rose' => ['pink', 'rose', 'blush', 'fuchsia', 'coral'],
+            'jaune' => ['yellow', 'jaune', 'mustard', 'gold'],
+            'orange' => ['orange', 'rust', 'terracotta'],
+            'violet' => ['purple', 'violet', 'lavender', 'lilac', 'mauve'],
+        ];
+    }
+
     public function __construct(
         private readonly SerpApiService $serpApi,
         private readonly PriceAnalysisService $priceAnalysis,
@@ -54,11 +77,21 @@ class LensImagePriceSearchService
         $gl = (string) config('driply.lens.shopping_gl', 'fr');
         $shoppingNum = (int) config('driply.lens.shopping_fetch_limit', 20);
 
-        $en = trim((string) ($itemDetails['search_query_en'] ?? ''));
-        $fr = trim((string) ($itemDetails['search_query_fr'] ?? ''));
+        $en = trim((string) ($itemDetails['search_query_google_en'] ?? $itemDetails['search_query_en'] ?? ''));
+        $fr = trim((string) ($itemDetails['search_query_google_fr'] ?? $itemDetails['search_query_fr'] ?? ''));
         $queries = array_values(array_unique(array_filter([$en, $fr], fn (string $q): bool => $q !== '')));
 
         $allRaw = [];
+
+        $lensData = $this->serpApi->rawLensResponse($imagePublicUrl, $hl, $gl);
+        $lensShopping = $lensData['shopping_results'] ?? [];
+        if (is_array($lensShopping)) {
+            foreach ($lensShopping as $row) {
+                if (is_array($row)) {
+                    $allRaw[] = $row;
+                }
+            }
+        }
 
         foreach ($queries as $query) {
             $rows = $this->serpApi->googleShoppingRawRows($query, $shoppingNum, $gl, $hl);
@@ -77,17 +110,7 @@ class LensImagePriceSearchService
             }
         }
 
-        $lensData = $this->serpApi->rawLensResponse($imagePublicUrl, $hl, $gl);
-        $lensShopping = $lensData['shopping_results'] ?? [];
-        if (is_array($lensShopping)) {
-            foreach ($lensShopping as $row) {
-                if (is_array($row)) {
-                    $allRaw[] = $row;
-                }
-            }
-        }
-
-        $products = $this->filterDedupeColorSort($allRaw, $itemDetails);
+        $products = $this->filterDedupeColorBuckets($allRaw, $itemDetails);
 
         $visualMatches = $lensData['visual_matches'] ?? [];
         if (! is_array($visualMatches)) {
@@ -97,7 +120,7 @@ class LensImagePriceSearchService
             $products = $this->supplementWithVisualMatches($products, $visualMatches, minRows: 3);
         }
 
-        $products = array_slice($products, 0, 10);
+        $products = array_slice($products, 0, 12);
 
         $searchLabel = implode(' | ', $queries);
 
@@ -140,15 +163,40 @@ class LensImagePriceSearchService
     }
 
     /**
+     * @return list<string>
+     */
+    private function colorVariantsForPrimary(string $colorPrimary): array
+    {
+        $raw = Str::lower(trim($colorPrimary));
+        if ($raw === '') {
+            return [];
+        }
+        $dict = self::colorDictionary();
+        if (isset($dict[$raw])) {
+            return $dict[$raw];
+        }
+        foreach ($dict as $key => $variants) {
+            if (str_contains($raw, $key) || str_contains($key, $raw)) {
+                return $variants;
+            }
+        }
+
+        return [$raw];
+    }
+
+    /**
      * @param  array<int, mixed>  $allRaw
      * @param  array<string, mixed>  $itemDetails
      * @return array<int, array<string, mixed>>
      */
-    private function filterDedupeColorSort(array $allRaw, array $itemDetails): array
+    private function filterDedupeColorBuckets(array $allRaw, array $itemDetails): array
     {
-        $colorPrimary = Str::lower(trim((string) ($itemDetails['color_primary'] ?? '')));
+        $colorPrimary = trim((string) ($itemDetails['color_primary'] ?? ''));
+        $variants = $this->colorVariantsForPrimary($colorPrimary);
+
         $seen = [];
-        $products = [];
+        $matchingProducts = [];
+        $fallbackProducts = [];
 
         foreach ($allRaw as $row) {
             if (! is_array($row)) {
@@ -172,68 +220,35 @@ class LensImagePriceSearchService
             $seen[$domain] = true;
 
             $titleLower = Str::lower((string) ($p['title'] ?? ''));
-            $colorMatch = $this->titleMatchesColorHint($titleLower, $colorPrimary);
-
-            $products[] = array_merge($p, ['color_match' => $colorMatch]);
-            if (count($products) >= 15) {
-                break;
-            }
-        }
-
-        usort($products, function (array $a, array $b): int {
-            $ca = ! empty($a['color_match']);
-            $cb = ! empty($b['color_match']);
-            if ($ca !== $cb) {
-                return $cb <=> $ca;
-            }
-
-            return ($a['extracted_price'] ?? 0) <=> ($b['extracted_price'] ?? 0);
-        });
-
-        return array_values($products);
-    }
-
-    private function titleMatchesColorHint(string $titleLower, string $colorPrimaryFr): bool
-    {
-        $raw = Str::lower(trim($colorPrimaryFr));
-        if ($raw === '') {
-            return true;
-        }
-
-        $map = [
-            'noir' => ['black', 'noir', 'schwarz'],
-            'blanc' => ['white', 'blanc', 'weiß', 'weiss'],
-            'bleu' => ['blue', 'bleu', 'indigo', 'navy', 'marine'],
-            'rouge' => ['red', 'rouge'],
-            'vert' => ['green', 'vert', 'olive'],
-            'gris' => ['grey', 'gray', 'gris'],
-            'beige' => ['beige', 'sand', 'cream'],
-            'marron' => ['brown', 'marron', 'camel', 'tan'],
-            'jaune' => ['yellow', 'jaune'],
-            'rose' => ['pink', 'rose'],
-            'violet' => ['violet', 'purple', 'pourpre'],
-            'orange' => ['orange'],
-        ];
-
-        $variants = null;
-        if (isset($map[$raw])) {
-            $variants = $map[$raw];
-        } else {
-            foreach ($map as $k => $v) {
-                if (Str::contains($raw, $k)) {
-                    $variants = $v;
-                    break;
+            $colorFound = false;
+            if ($variants !== []) {
+                foreach ($variants as $variant) {
+                    $v = Str::lower(trim($variant));
+                    if ($v !== '' && str_contains($titleLower, $v)) {
+                        $colorFound = true;
+                        break;
+                    }
                 }
+            } else {
+                $colorFound = true;
             }
-        }
-        $variants ??= [$raw];
-        foreach ($variants as $variant) {
-            if ($variant !== '' && str_contains($titleLower, $variant)) {
-                return true;
+
+            $product = array_merge($p, [
+                'color_confirmed' => $colorFound,
+                'color_match' => $colorFound,
+            ]);
+
+            if ($colorFound) {
+                $matchingProducts[] = $product;
+            } else {
+                $fallbackProducts[] = $product;
             }
         }
 
-        return false;
+        usort($matchingProducts, fn (array $a, array $b): int => ($a['extracted_price'] ?? 0) <=> ($b['extracted_price'] ?? 0));
+        usort($fallbackProducts, fn (array $a, array $b): int => ($a['extracted_price'] ?? 0) <=> ($b['extracted_price'] ?? 0));
+
+        return array_values(array_slice(array_merge($matchingProducts, $fallbackProducts), 0, 12));
     }
 
     private function normalizeHost(string $url): string
@@ -299,6 +314,7 @@ class LensImagePriceSearchService
                 'thumbnail' => $thumb !== '' ? $thumb : ($image !== '' ? $image : null),
                 'rating' => isset($vm['rating']) && is_numeric($vm['rating']) ? $vm['rating'] + 0 : null,
                 'reviews' => isset($vm['reviews']) && is_numeric($vm['reviews']) ? (int) $vm['reviews'] : null,
+                'color_confirmed' => true,
                 'color_match' => true,
             ];
         }
