@@ -152,6 +152,14 @@ Les deux chemins envoient le **même type d’e-mail** (lien sécurisé). La ré
 
 ---
 
+## Outfits serveur vs fiches locales dans l’app
+
+- **`GET /api/outfits`**, **`POST /api/outfits`**, etc. : tenues **enregistrées en base** pour l’utilisateur connecté (modèle SQL `outfits`). C’est la **source de vérité** « compte » : brouillons, titres, images, pièces rattachées via l’API.
+- **Sur l’iPhone**, Core Data garde aussi des **imports Lens** (bouton *Enregistrer* après un scan) : une même fiche peut contenir **plusieurs lignes produit** (meilleures offres). Ce ne sont **pas** des `Outfit` API tant qu’ils ne sont pas créés ou liés via **`POST /api/outfits`** ou le flux *Ajouter à un outfit*.
+- L’app iOS marque ces entrées avec **`localOrigin = lensImport`** et n’affiche dans la rangée **« Mes outfits » (projets)** que les tenues **`localOrigin = manualOutfit`** construites dans le simulateur avec **au moins 2 pièces**. Les résultats Lens restent dans **Ajouts récents** / **Mes inspirations**.
+
+---
+
 ## Pagination
 
 Les listes paginées exposent `meta.pagination` :
