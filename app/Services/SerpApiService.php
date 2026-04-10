@@ -145,6 +145,50 @@ class SerpApiService
     }
 
     /**
+     * Google Lens en mode produits (`type=products`) : visual_matches avec prix / liens / miniatures.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ExternalServiceException
+     */
+    public function rawGoogleLensProducts(string $imagePublicUrl, string $hl = 'fr', string $gl = 'fr'): array
+    {
+        $this->assertKey();
+        $sanitized = $this->sanitizeRemoteUrl($imagePublicUrl);
+
+        $params = [
+            'engine' => 'google_lens',
+            'url' => $sanitized,
+            'type' => 'products',
+            'api_key' => $this->apiKey,
+            'hl' => $hl,
+            'gl' => $gl,
+            'country' => $gl,
+        ];
+        if (config('driply.serpapi.no_cache', true)) {
+            $params['no_cache'] = 'true';
+        }
+
+        try {
+            $response = Http::timeout(90)
+                ->acceptJson()
+                ->get($this->baseUrl.'/search', $params)
+                ->throw();
+        } catch (RequestException $e) {
+            throw new ExternalServiceException('SerpAPI Google Lens (products) failed: '.$e->getMessage(), 0, $e);
+        } catch (Throwable $e) {
+            throw new ExternalServiceException('SerpAPI Lens products unavailable: '.$e->getMessage(), 0, $e);
+        }
+
+        $decoded = $response->json();
+        if (! is_array($decoded)) {
+            throw new ExternalServiceException('Invalid SerpAPI Lens products response');
+        }
+
+        return $decoded;
+    }
+
+    /**
      * Recherche [Google Shopping API (SerpAPI)](https://serpapi.com/google-shopping-api) : prix, liens, miniatures.
      *
      * @return array<int, array{title: string, link: string, source: string, thumbnail_url: string, price: ?string, extracted_price: float|int|null, currency: ?string}>

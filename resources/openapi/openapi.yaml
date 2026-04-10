@@ -405,7 +405,10 @@ paths:
   /search/lens:
     post:
       tags: [Lens]
-      summary: Analyse Lens (image + options OpenAI si configuré)
+      summary: Analyse Lens (SerpAPI Google Lens type=products, fallback Shopping, classement GPT)
+      description: |
+        Image en multipart ou `image_url` : SerpAPI `google_lens` avec `type=products`, fusion Shopping si moins de 5 offres Lens,
+        déduplication par domaine, puis OpenAI pour **5** offres finales (`top_results` / `results`). Utilise SerpAPI `google_lens` + `type=products`.
       security: [{ BearerAuth: [] }]
       responses:
         '200':

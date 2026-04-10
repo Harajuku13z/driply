@@ -6,7 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Services\GoogleLensService;
-use App\Services\LensImagePriceSearchService;
+use App\Services\LensProductsPipelineService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -32,7 +32,7 @@ class LensAnalyzeResponseTest extends TestCase
             $mock->shouldReceive('absolutePublicUrlForStoredPath')->andReturn('https://example.test/storage/lens/x.jpg');
         });
 
-        $this->mock(LensImagePriceSearchService::class, function ($mock): void {
+        $this->mock(LensProductsPipelineService::class, function ($mock): void {
             $mock->shouldReceive('searchAndAnalyze')->once()->andReturn([
                 'all_products' => [],
                 'price_analysis' => [

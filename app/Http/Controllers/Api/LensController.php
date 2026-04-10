@@ -14,7 +14,7 @@ use App\Models\LensResult;
 use App\Models\Outfit;
 use App\Models\User;
 use App\Services\GoogleLensService;
-use App\Services\LensImagePriceSearchService;
+use App\Services\LensProductsPipelineService;
 use App\Support\UnwrapGoogleUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,7 +29,7 @@ class LensController extends Controller
 {
     use ApiResponses;
 
-    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, LensImagePriceSearchService $lensSearch): JsonResponse
+    public function analyze(LensAnalyzeRequest $request, GoogleLensService $lens, LensProductsPipelineService $lensPipeline): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -61,7 +61,7 @@ class LensController extends Controller
                 ]);
             }
 
-            $payload = $lensSearch->searchAndAnalyze($inputPath, $inputPreviewUrl, $currency);
+            $payload = $lensPipeline->searchAndAnalyze($inputPath, $inputPreviewUrl, $currency);
             $allProducts = $payload['all_products'];
             $priceAnalysis = $payload['price_analysis'];
             $top3 = $payload['top_3'];
