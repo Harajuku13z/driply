@@ -41,17 +41,19 @@ return new class extends Migration
             Schema::dropIfExists('inspirations');
             Schema::dropIfExists('groupes');
 
-            DB::statement('ALTER TABLE `users` ADD COLUMN `new_id` CHAR(36) NULL');
+            if (! Schema::hasColumn('users', 'new_id')) {
+                DB::statement('ALTER TABLE `users` ADD COLUMN `new_id` CHAR(36) NULL');
+            }
 
-            $oldIds = DB::table('users')->pluck('id');
-            $map = [];
+            $oldIds = DB::table('users')->whereNull('new_id')->pluck('id');
             foreach ($oldIds as $oldId) {
-                $map[(string) $oldId] = Str::uuid()->toString();
-                DB::table('users')->where('id', $oldId)->update(['new_id' => $map[(string) $oldId]]);
+                DB::table('users')->where('id', $oldId)->update([
+                    'new_id' => Str::uuid()->toString(),
+                ]);
             }
 
             $this->rewriteSessionsUserIds();
-            $this->rewriteSanctumTokenableIds($map);
+            $this->rewriteSanctumTokenableIds();
 
             DB::statement('ALTER TABLE `users` DROP PRIMARY KEY');
             DB::statement('ALTER TABLE `users` DROP COLUMN `id`');
@@ -84,7 +86,14 @@ return new class extends Migration
             return;
         }
 
-        DB::statement('ALTER TABLE `sessions` ADD COLUMN `new_user_id` CHAR(36) NULL');
+        $userIdCol = DB::selectOne('SHOW COLUMNS FROM `sessions` WHERE Field = ?', ['user_id']);
+        if ($userIdCol !== null && $this->typeIsUuidLike($userIdCol->Type)) {
+            return;
+        }
+
+        if (! Schema::hasColumn('sessions', 'new_user_id')) {
+            DB::statement('ALTER TABLE `sessions` ADD COLUMN `new_user_id` CHAR(36) NULL');
+        }
 
         DB::statement('
             UPDATE `sessions` s
@@ -92,34 +101,76 @@ return new class extends Migration
             SET s.`new_user_id` = u.`new_id`
         ');
 
-        DB::statement('ALTER TABLE `sessions` DROP COLUMN `user_id`');
-        DB::statement('ALTER TABLE `sessions` CHANGE `new_user_id` `user_id` CHAR(36) NULL');
+        if (Schema::hasColumn('sessions', 'user_id')) {
+            DB::statement('ALTER TABLE `sessions` DROP COLUMN `user_id`');
+        }
+
+        if (Schema::hasColumn('sessions', 'new_user_id')) {
+            DB::statement('ALTER TABLE `sessions` CHANGE `new_user_id` `user_id` CHAR(36) NULL');
+        }
     }
 
     /**
-     * @param  array<string, string>  $oldIdToUuid
+     * tokenable_id en BIGINT : impossible d’y écrire un UUID avant changement de type.
+     * On utilise une colonne CHAR temporaire, comme pour sessions.user_id.
      */
-    private function rewriteSanctumTokenableIds(array $oldIdToUuid): void
+    private function rewriteSanctumTokenableIds(): void
     {
         if (! Schema::hasTable('personal_access_tokens')) {
             return;
         }
 
+        $col = DB::selectOne('SHOW COLUMNS FROM `personal_access_tokens` WHERE Field = ?', ['tokenable_id']);
+        if ($col === null) {
+            return;
+        }
+
+        $typeLower = strtolower((string) $col->Type);
+        $isIntegerMorph = str_contains($typeLower, 'int');
+
         $userClass = User::class;
 
-        foreach ($oldIdToUuid as $old => $uuid) {
+        if ($isIntegerMorph) {
+            if (! Schema::hasColumn('personal_access_tokens', 'new_tokenable_id')) {
+                DB::statement('ALTER TABLE `personal_access_tokens` ADD COLUMN `new_tokenable_id` CHAR(36) NULL');
+            }
+
+            DB::statement(
+                'UPDATE `personal_access_tokens` t
+                 INNER JOIN `users` u ON t.`tokenable_type` = ? AND t.`tokenable_id` = u.`id`
+                 SET t.`new_tokenable_id` = u.`new_id`
+                 WHERE t.`new_tokenable_id` IS NULL',
+                [$userClass],
+            );
+
             DB::table('personal_access_tokens')
                 ->where('tokenable_type', $userClass)
-                ->where(function ($q) use ($old): void {
-                    $q->where('tokenable_id', $old)->orWhere('tokenable_id', (string) $old);
-                })
-                ->update(['tokenable_id' => $uuid]);
+                ->whereNull('new_tokenable_id')
+                ->delete();
+
+            DB::statement(
+                'UPDATE `personal_access_tokens`
+                 SET `new_tokenable_id` = CAST(`tokenable_id` AS CHAR(36))
+                 WHERE `new_tokenable_id` IS NULL',
+            );
+
+            if (Schema::hasColumn('personal_access_tokens', 'tokenable_id')) {
+                DB::statement('ALTER TABLE `personal_access_tokens` DROP COLUMN `tokenable_id`');
+            }
+
+            if (Schema::hasColumn('personal_access_tokens', 'new_tokenable_id')) {
+                DB::statement('ALTER TABLE `personal_access_tokens` CHANGE `new_tokenable_id` `tokenable_id` CHAR(36) NOT NULL');
+            }
+
+            return;
         }
 
-        $col = DB::selectOne('SHOW COLUMNS FROM `personal_access_tokens` WHERE Field = ?', ['tokenable_id']);
-        if ($col !== null && str_contains(strtolower((string) $col->Type), 'bigint')) {
-            DB::statement('ALTER TABLE `personal_access_tokens` MODIFY `tokenable_id` CHAR(36) NOT NULL');
-        }
+        DB::statement(
+            'UPDATE `personal_access_tokens` t
+             INNER JOIN `users` u ON t.`tokenable_type` = ? AND (t.`tokenable_id` = CAST(u.`id` AS CHAR) OR t.`tokenable_id` = u.`id`)
+             SET t.`tokenable_id` = u.`new_id`',
+            [$userClass],
+        );
     }
 
     private function dropForeignKeysReferencingUsersTable(): void
