@@ -260,7 +260,10 @@ PROMPT;
                 continue;
             }
             $price = $r['price'] ?? 0;
-            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $priceF = $this->parsePriceScalar($price);
+            if ($priceF < 0.01) {
+                $priceF = $this->parsePriceScalar($r['price_formatted'] ?? '');
+            }
             $topResults[] = [
                 'rank_label' => (string) ($r['rank_label'] ?? ''),
                 'title' => (string) ($r['title'] ?? 'Sans titre'),
@@ -327,7 +330,10 @@ PROMPT;
             }
             $seenHosts[$host] = true;
             $price = $r['price'] ?? 0;
-            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $priceF = $this->parsePriceScalar($price);
+            if ($priceF < 0.01) {
+                $priceF = $this->parsePriceScalar($r['price_formatted'] ?? '');
+            }
             $candidates[] = [
                 'rank_label' => (string) ($r['rank_label'] ?? ''),
                 'title' => (string) ($r['title'] ?? 'Sans titre'),
@@ -454,7 +460,10 @@ PROMPT;
             }
             $seenLinks[$link] = true;
             $price = $tr['price'] ?? 0;
-            $priceF = is_numeric($price) ? (float) $price : 0.0;
+            $priceF = $this->parsePriceScalar($price);
+            if ($priceF < 0.01) {
+                $priceF = $this->parsePriceScalar($tr['price_formatted'] ?? '');
+            }
             $pickRows[] = [
                 'title' => (string) ($tr['title'] ?? 'Sans titre'),
                 'price' => $priceF,
@@ -641,7 +650,10 @@ PROMPT;
     {
         $link = (string) ($pick['link'] ?? '');
         $price = $pick['price'] ?? 0;
-        $priceF = is_numeric($price) ? (float) $price : 0.0;
+        $priceF = $this->parsePriceScalar($price);
+        if ($priceF < 0.01) {
+            $priceF = $this->parsePriceScalar($pick['price_formatted'] ?? '');
+        }
         if ($link !== '') {
             foreach ($products as $pr) {
                 if (($pr['link'] ?? '') === $link && isset($pr['extracted_price']) && is_numeric($pr['extracted_price']) && $priceF < 0.01) {
@@ -891,5 +903,46 @@ PROMPT;
                 'shopping_offers' => $offers,
             ];
         }, $lensProducts));
+    }
+
+    /**
+     * Interprète un prix JSON hétérogène (nombre, chaîne "49,99 €", "1.234,56", etc.).
+     */
+    private function parsePriceScalar(mixed $value): float
+    {
+        if ($value === null || $value === '') {
+            return 0.0;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
+        }
+        if (is_string($value)) {
+            $s = trim($value);
+            if ($s === '') {
+                return 0.0;
+            }
+            if (is_numeric($s)) {
+                return (float) $s;
+            }
+            $s = str_replace(["\xc2\xa0", ' '], '', $s);
+            $s = str_ireplace(['€', 'eur', '$', 'usd'], '', $s);
+            $s = trim($s);
+            if ($s === '') {
+                return 0.0;
+            }
+            $lastComma = strrpos($s, ',');
+            $lastDot = strrpos($s, '.');
+            if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                $s = str_replace('.', '', $s);
+                $s = str_replace(',', '.', $s);
+            } else {
+                $s = str_replace(',', '', $s);
+            }
+            if (is_numeric($s)) {
+                return (float) $s;
+            }
+        }
+
+        return 0.0;
     }
 }
