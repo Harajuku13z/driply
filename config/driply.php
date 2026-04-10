@@ -61,6 +61,12 @@ return [
     'ios_open_app_after_password_reset_url' => env('DRIPLY_IOS_OPEN_APP_AFTER_PASSWORD_RESET', 'driply://'),
 
     /*
+    | URL absolue de la politique de confidentialité. Si vide : route web `legal.privacy`
+    | (`/politique-de-confidentialite` sur le même domaine que APP_URL).
+    */
+    'privacy_policy_url' => env('DRIPLY_PRIVACY_POLICY_URL', ''),
+
+    /*
     | Import médias réseaux : backend custom POST /media/fetch, ou FastSaverAPI
     | (FASTSERVER_URL hôte fastsaverapi.com → GET /get-info + token en query).
     */

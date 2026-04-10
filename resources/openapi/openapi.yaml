@@ -25,6 +25,7 @@ tags:
   - name: Tags
   - name: Dashboard
   - name: Diagnostics
+  - name: Legal
 
 paths:
   /verif:
@@ -34,6 +35,32 @@ paths:
       responses:
         '200':
           description: HTML ou JSON selon Accept / query
+
+  /legal:
+    get:
+      tags: [Legal]
+      summary: Liens légaux publics
+      description: |
+        Sans authentification. Retourne notamment `privacy_policy_url` (page HTML sur le site ou URL surchargée via `DRIPLY_PRIVACY_POLICY_URL`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      privacy_policy_url:
+                        type: string
+                        format: uri
+                        description: URL absolue de la politique de confidentialité
+                  message: { type: string }
+                  meta:
+                    type: object
 
   /register:
     post:
@@ -654,6 +681,11 @@ components:
             token: { type: string }
             user: { type: object }
         message: { type: string }
+
+    LegalUrls:
+      type: object
+      properties:
+        privacy_policy_url: { type: string, format: uri }
 
   responses:
     ValidationError:

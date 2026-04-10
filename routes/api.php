@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\LegalController;
 use App\Http\Controllers\Api\LensController;
 use App\Http\Controllers\Api\MediaImportController;
 use App\Http\Controllers\Api\OutfitController;
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\Route;
 
 /** Même diagnostic que GET /api-verif (évite une 404 si on tape /api/verif). */
 Route::get('/verif', ApiVerifController::class);
+
+/** Liens légaux publics (politique de confidentialité, etc.). */
+Route::get('/legal', [LegalController::class, 'show']);
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
