@@ -108,6 +108,7 @@ class LensProductsPipelineService
                         'source' => $sourceLabel !== '' ? $sourceLabel : ($host !== '' ? $host : ''),
                         'link' => $link,
                         'thumbnail' => $catalog['thumbnail'],
+                        'image' => $catalog['image'] ?? null,
                         'rating' => $catalog['rating'],
                         'reviews' => $catalog['reviews'],
                         'in_stock' => true,
@@ -224,6 +225,7 @@ class LensProductsPipelineService
         }
 
         $thumb = $item['thumbnail'] ?? $item['thumbnail_url'] ?? null;
+        $fullImg = $item['image'] ?? null;
         $rating = $item['rating'] ?? null;
         $reviews = $item['reviews'] ?? $item['reviews_count'] ?? null;
 
@@ -235,6 +237,7 @@ class LensProductsPipelineService
             'source' => (string) ($item['source'] ?? ''),
             'link' => $link,
             'thumbnail' => is_string($thumb) ? $thumb : (is_scalar($thumb) ? (string) $thumb : null),
+            'image' => is_string($fullImg) && $fullImg !== '' ? $fullImg : (is_scalar($fullImg) ? (string) $fullImg : null),
             'rating' => is_numeric($rating) ? (float) $rating : null,
             'reviews' => is_numeric($reviews) ? (int) $reviews : null,
             'in_stock' => filter_var($item['in_stock'] ?? true, FILTER_VALIDATE_BOOL),
@@ -351,6 +354,7 @@ Réponds UNIQUEMENT avec un JSON valide UTF-8, sans markdown ni backticks, struc
       "source": "domaine.fr",
       "link": "https://...",
       "thumbnail": "https://...",
+      "image": "https://...",
       "rating": 4.5,
       "reviews": 1200,
       "in_stock": true,
@@ -419,6 +423,18 @@ PROMPT;
             if ($link === '' || $thumb === '' || isset($seenLinks[$link])) {
                 continue;
             }
+            if (trim((string) ($normalized['image'] ?? '')) === '') {
+                foreach ($uniqueCatalog as $cat) {
+                    if ((string) ($cat['link'] ?? '') !== $link) {
+                        continue;
+                    }
+                    $img = trim((string) ($cat['image'] ?? ''));
+                    if ($img !== '') {
+                        $normalized['image'] = $img;
+                    }
+                    break;
+                }
+            }
             $seenLinks[$link] = true;
             $normalized['rank_label'] = self::RANK_LABELS[count($out)] ?? (string) ($normalized['rank_label'] ?? '');
             $out[] = $normalized;
@@ -435,6 +451,7 @@ PROMPT;
             }
             $seenLinks[$link] = true;
             $price = (float) ($row['extracted_price'] ?? 0);
+            $fullImg = trim((string) ($row['image'] ?? ''));
             $out[] = $this->normalizeTopResultRow([
                 'rank_label' => self::RANK_LABELS[count($out)] ?? 'Offre',
                 'title' => (string) ($row['title'] ?? ''),
@@ -443,6 +460,7 @@ PROMPT;
                 'source' => (string) ($row['source'] ?? ''),
                 'link' => $link,
                 'thumbnail' => $thumb,
+                'image' => $fullImg,
                 'rating' => $row['rating'] ?? null,
                 'reviews' => $row['reviews'] ?? null,
                 'in_stock' => true,
@@ -482,6 +500,7 @@ PROMPT;
             'source' => (string) ($row['source'] ?? ''),
             'link' => $link,
             'thumbnail' => (string) ($row['thumbnail'] ?? ''),
+            'image' => (string) ($row['image'] ?? ''),
             'why_selected' => (string) ($row['why_selected'] ?? ''),
             'rating' => isset($row['rating']) && is_numeric($row['rating']) ? (float) $row['rating'] : null,
             'reviews' => isset($row['reviews']) && is_numeric($row['reviews']) ? (int) $row['reviews'] : null,

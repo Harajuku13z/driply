@@ -378,6 +378,9 @@ class SerpApiService
             $currency = 'EUR';
         }
 
+        $fullImage = (string) ($row['image'] ?? '');
+        $fullImage = $fullImage !== '' ? $fullImage : null;
+
         return [
             'title' => $normalized['title'] !== '' ? $normalized['title'] : 'Sans titre',
             'price' => $normalized['price'],
@@ -386,6 +389,7 @@ class SerpApiService
             'source' => $normalized['source'] !== '' ? $normalized['source'] : null,
             'link' => $link,
             'thumbnail' => $normalized['thumbnail_url'] !== '' ? $normalized['thumbnail_url'] : null,
+            'image' => $fullImage,
             'rating' => is_numeric($rating) ? $rating + 0 : null,
             'reviews' => is_numeric($reviews) ? (int) $reviews : null,
         ];
