@@ -18,7 +18,7 @@ class ApiRegistrationTest extends TestCase
     {
         Notification::fake();
 
-        $response = $this->postJson('/api/register', [
+        $response = $this->postJson('/api/v1/auth/register', [
             'name' => 'Jane',
             'email' => 'jane@example.com',
             'password' => 'password123',
@@ -29,7 +29,7 @@ class ApiRegistrationTest extends TestCase
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.user.email_verified', false)
             ->assertJsonStructure([
-                'data' => ['token', 'user' => ['id', 'email', 'plan', 'outfits_count', 'email_verified']],
+                'data' => ['token', 'user' => ['id', 'email', 'currency', 'email_verified']],
             ]);
 
         $this->assertDatabaseHas('users', [

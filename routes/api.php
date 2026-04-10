@@ -2,85 +2,68 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LegalController;
-use App\Http\Controllers\Api\LensController;
-use App\Http\Controllers\Api\MediaImportController;
-use App\Http\Controllers\Api\OutfitController;
-use App\Http\Controllers\Api\OutfitImageController;
-use App\Http\Controllers\Api\ScanController;
-use App\Http\Controllers\Api\SearchController;
-use App\Http\Controllers\Api\TagController;
+use App\Http\Controllers\Api\V1\AuthController as V1AuthController;
+use App\Http\Controllers\Api\V1\DashboardController as V1DashboardController;
+use App\Http\Controllers\Api\V1\GroupeController as V1GroupeController;
+use App\Http\Controllers\Api\V1\GroupeItemController as V1GroupeItemController;
+use App\Http\Controllers\Api\V1\InspirationController as V1InspirationController;
+use App\Http\Controllers\Api\V1\ScanController as V1ScanController;
 use App\Http\Controllers\ApiVerifController;
 use Illuminate\Support\Facades\Route;
 
-/** Même diagnostic que GET /api-verif (évite une 404 si on tape /api/verif). */
 Route::get('/verif', ApiVerifController::class);
 
-/** Liens légaux publics (politique de confidentialité, etc.). */
 Route::get('/legal', [LegalController::class, 'show']);
 
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::prefix('v1')->group(function (): void {
+    Route::post('/auth/register', [V1AuthController::class, 'register']);
+    Route::post('/auth/login', [V1AuthController::class, 'login']);
+    Route::post('/auth/forgot-password', [V1AuthController::class, 'forgotPassword']);
+    Route::post('/auth/reset-password', [V1AuthController::class, 'resetPassword']);
 
-Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
-    ->middleware(['signed', 'throttle:6,1'])
-    ->name('verification.verify');
+    Route::middleware('auth:sanctum')->group(function (): void {
+        Route::post('/auth/logout', [V1AuthController::class, 'logout']);
+        Route::get('/auth/me', [V1AuthController::class, 'me']);
+        Route::post('/auth/email/resend', [V1AuthController::class, 'resendVerificationEmail'])
+            ->middleware('throttle:6,1');
 
-Route::middleware('auth:sanctum')->group(function (): void {
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('/me', [AuthController::class, 'me']);
-    Route::post('/email/resend', [AuthController::class, 'resendVerificationEmail'])
-        ->middleware('throttle:6,1');
-    Route::post('/email/verification-notification', [AuthController::class, 'resendVerificationEmail'])
-        ->middleware('throttle:6,1');
+        Route::middleware('verified.api')->group(function (): void {
+            Route::put('/auth/me', [V1AuthController::class, 'updateMe']);
+            Route::put('/auth/me/password', [V1AuthController::class, 'updatePassword']);
 
-    Route::middleware('verified.api')->group(function (): void {
-        Route::put('/me', [AuthController::class, 'updateMe']);
-        Route::put('/me/password', [AuthController::class, 'updatePassword']);
+            Route::get('/dashboard', V1DashboardController::class);
 
-        Route::get('/dashboard', DashboardController::class);
+            Route::get('/groupes', [V1GroupeController::class, 'index']);
+            Route::post('/groupes', [V1GroupeController::class, 'store']);
+            Route::put('/groupes/reorder', [V1GroupeController::class, 'reorder']);
+            Route::get('/groupes/{id}', [V1GroupeController::class, 'show']);
+            Route::put('/groupes/{id}', [V1GroupeController::class, 'update']);
+            Route::delete('/groupes/{id}', [V1GroupeController::class, 'destroy']);
+            Route::put('/groupes/{id}/cover', [V1GroupeController::class, 'updateCover']);
 
-        Route::get('/outfits', [OutfitController::class, 'index']);
-        Route::post('/outfits', [OutfitController::class, 'store']);
-        Route::get('/outfits/{id}', [OutfitController::class, 'show']);
-        Route::put('/outfits/{id}', [OutfitController::class, 'update']);
-        Route::delete('/outfits/{id}', [OutfitController::class, 'destroy']);
-        Route::get('/outfits/{id}/similar', [OutfitController::class, 'similar']);
-        Route::post('/outfits/{id}/images', [OutfitImageController::class, 'store']);
-        Route::delete('/outfits/{outfitId}/images/{imageId}', [OutfitImageController::class, 'destroy']);
-        Route::put('/outfits/{outfitId}/images/{imageId}/primary', [OutfitImageController::class, 'setPrimary']);
+            Route::put('/groupes/{groupeId}/items/reorder', [V1GroupeItemController::class, 'reorder']);
+            Route::post('/groupes/{groupeId}/items', [V1GroupeItemController::class, 'store']);
+            Route::put('/groupes/{groupeId}/items/{inspirationId}', [V1GroupeItemController::class, 'updateItemNote']);
+            Route::delete('/groupes/{groupeId}/items/{inspirationId}', [V1GroupeItemController::class, 'destroy']);
 
-        Route::middleware('throttle:search')->group(function (): void {
-            Route::post('/search/images', [SearchController::class, 'images']);
-            Route::post('/search/images/attach', [SearchController::class, 'attach']);
-            Route::post('/search/lens', [LensController::class, 'analyze']);
+            Route::get('/inspirations', [V1InspirationController::class, 'index']);
+            Route::post('/inspirations', [V1InspirationController::class, 'store']);
+            Route::post('/inspirations/scan', [V1ScanController::class, 'store'])
+                ->middleware('throttle:scan-import');
+            Route::post('/inspirations/import', [V1InspirationController::class, 'import'])
+                ->middleware('throttle:scan-import');
+            Route::get('/inspirations/{id}', [V1InspirationController::class, 'show']);
+            Route::put('/inspirations/{id}', [V1InspirationController::class, 'update']);
+            Route::delete('/inspirations/{id}', [V1InspirationController::class, 'destroy']);
+            Route::post('/inspirations/{id}/favorite', [V1InspirationController::class, 'toggleFavorite']);
+
+            Route::post('/scan', [V1ScanController::class, 'store'])
+                ->middleware('throttle:scan-import');
         });
-
-        Route::get('/search/lens/history', [LensController::class, 'history']);
-        Route::get('/search/lens/{id}', [LensController::class, 'show']);
-        Route::post('/search/lens/{id}/attach-outfit', [LensController::class, 'attachOutfit']);
-
-        Route::post('/media/import', [MediaImportController::class, 'store']);
-        Route::get('/media', [MediaImportController::class, 'index']);
-        Route::get('/media/{id}', [MediaImportController::class, 'show']);
-        Route::delete('/media/{id}', [MediaImportController::class, 'destroy']);
-        Route::post('/media/{id}/extract-frames', [MediaImportController::class, 'extractFrames']);
-        Route::post('/media/{id}/attach-outfit', [MediaImportController::class, 'attachOutfit']);
-
-        Route::post('/scan/start', [ScanController::class, 'start']);
-        Route::get('/scan/history', [ScanController::class, 'history']);
-        Route::get('/scan/{scanId}', [ScanController::class, 'show']);
-        Route::get('/scan/{scanId}/results', [ScanController::class, 'results']);
-        Route::post('/scan/{scanId}/resolve', [ScanController::class, 'resolve']);
-
-        Route::get('/tags', [TagController::class, 'index']);
-        Route::post('/tags', [TagController::class, 'store']);
-        Route::delete('/tags/{id}', [TagController::class, 'destroy']);
-        Route::post('/outfits/{id}/tags', [TagController::class, 'attachToOutfit']);
-        Route::delete('/outfits/{id}/tags/{tagId}', [TagController::class, 'detachFromOutfit']);
     });
 });
+
+Route::get('/email/verify/{id}/{hash}', [V1AuthController::class, 'verifyEmail'])
+    ->middleware(['signed', 'throttle:6,1'])
+    ->name('verification.verify');

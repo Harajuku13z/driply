@@ -32,8 +32,7 @@ class Tag extends Model
      */
     public function outfits(): BelongsToMany
     {
-        return $this->belongsToMany(Outfit::class, 'outfit_tag', 'tag_id', 'outfit_id')
-            ->withTimestamps();
+        return $this->belongsToMany(Outfit::class, 'outfit_tag', 'tag_id', 'outfit_id');
     }
 
     public function isOwnedBy(?int $userId): bool

@@ -65,7 +65,6 @@ class Outfit extends Model
      */
     public function tagModels(): BelongsToMany
     {
-        return $this->belongsToMany(Tag::class, 'outfit_tag', 'outfit_id', 'tag_id')
-            ->withTimestamps();
+        return $this->belongsToMany(Tag::class, 'outfit_tag', 'outfit_id', 'tag_id');
     }
 }

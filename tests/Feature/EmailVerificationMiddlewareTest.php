@@ -19,29 +19,29 @@ class EmailVerificationMiddlewareTest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/auth/me')
             ->assertOk()
             ->assertJsonPath('data.email_verified', false);
     }
 
-    public function test_outfits_forbidden_when_email_not_verified(): void
+    public function test_inspirations_forbidden_when_email_not_verified(): void
     {
         $user = User::factory()->unverified()->create();
 
         Sanctum::actingAs($user);
 
-        $this->getJson('/api/outfits')
+        $this->getJson('/api/v1/inspirations')
             ->assertForbidden()
             ->assertJsonPath('success', false);
     }
 
-    public function test_outfits_ok_when_email_verified(): void
+    public function test_inspirations_ok_when_email_verified(): void
     {
         $user = User::factory()->create();
 
         Sanctum::actingAs($user);
 
-        $this->getJson('/api/outfits')
+        $this->getJson('/api/v1/inspirations')
             ->assertOk();
     }
 }

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\UserPlan;
 use Database\Factories\UserFactory;
 use Illuminate\Auth\MustVerifyEmail as MustVerifyEmailTrait;
 use Illuminate\Auth\Passwords\CanResetPassword;
 use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -22,6 +22,7 @@ class User extends Authenticatable implements CanResetPasswordContract, MustVeri
     use CanResetPassword;
     use HasApiTokens;
     use HasFactory;
+    use HasUuids;
     use MustVerifyEmailTrait;
     use Notifiable;
 
@@ -33,9 +34,7 @@ class User extends Authenticatable implements CanResetPasswordContract, MustVeri
         'email',
         'password',
         'avatar',
-        'plan',
-        'currency_preference',
-        'outfits_count',
+        'currency',
     ];
 
     /**
@@ -54,23 +53,22 @@ class User extends Authenticatable implements CanResetPasswordContract, MustVeri
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'plan' => UserPlan::class,
         ];
     }
 
     /**
-     * @return HasMany<Outfit, $this>
+     * @return HasMany<Groupe, $this>
      */
-    public function outfits(): HasMany
+    public function groupes(): HasMany
     {
-        return $this->hasMany(Outfit::class);
+        return $this->hasMany(Groupe::class);
     }
 
     /**
-     * @return HasMany<Tag, $this>
+     * @return HasMany<Inspiration, $this>
      */
-    public function tags(): HasMany
+    public function inspirations(): HasMany
     {
-        return $this->hasMany(Tag::class);
+        return $this->hasMany(Inspiration::class);
     }
 }

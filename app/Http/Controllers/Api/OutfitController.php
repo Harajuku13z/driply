@@ -24,7 +24,10 @@ class OutfitController extends Controller
     {
         $perPage = min(max((int) $request->query('per_page', 20), 1), 100);
 
-        $query = $request->user()
+        /** @var \App\Models\User $owner */
+        $owner = $request->user();
+        // Relation hasMany(user_id) : une seule tenue par compte (jamais mélanger les utilisateurs).
+        $query = $owner
             ->outfits()
             ->with(['images', 'tagModels']);
 

@@ -4,15 +4,22 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Groupe;
+use App\Models\Inspiration;
 use App\Models\User;
+use App\Policies\GroupePolicy;
+use App\Policies\InspirationPolicy;
+use App\Services\DriplyV1ScanAnalysisService;
 use App\Services\FastServerService;
 use App\Services\GoogleLensService;
+use App\Services\GoogleShoppingService;
 use App\Services\LensImagePriceSearchService;
 use App\Services\LensProductsPipelineService;
 use App\Services\LensShoppingEnrichmentService;
 use App\Services\PHashService;
 use App\Services\PriceAnalysisService;
 use App\Services\SerpApiService;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -34,6 +41,8 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(SerpApiService::class);
         $this->app->singleton(GoogleLensService::class);
+        $this->app->singleton(GoogleShoppingService::class);
+        $this->app->singleton(DriplyV1ScanAnalysisService::class);
         $this->app->singleton(LensShoppingEnrichmentService::class);
         $this->app->singleton(LensImagePriceSearchService::class);
         $this->app->singleton(LensProductsPipelineService::class);
@@ -47,10 +56,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::policy(Groupe::class, GroupePolicy::class);
+        Gate::policy(Inspiration::class, InspirationPolicy::class);
+
         RateLimiter::for('search', function (Request $request): Limit {
             $id = (string) ($request->user()?->getAuthIdentifier() ?? $request->ip());
 
             return Limit::perMinute(30)->by($id);
+        });
+
+        RateLimiter::for('scan-import', function (Request $request): Limit {
+            $id = (string) ($request->user()?->getAuthIdentifier() ?? $request->ip());
+
+            return Limit::perMinute(20)->by($id);
         });
 
         VerifyEmail::createUrlUsing(function (object $notifiable): string {
