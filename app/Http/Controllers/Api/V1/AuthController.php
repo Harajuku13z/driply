@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -93,7 +94,20 @@ class AuthController extends Controller
             return $this->success(['already_verified' => true], 'E-mail déjà vérifié.');
         }
 
-        $user->sendEmailVerificationNotification();
+        try {
+            $user->sendEmailVerificationNotification();
+        } catch (Throwable $e) {
+            Log::error('driply.verification_email_send_failed', [
+                'user_id' => $user->id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error(
+                'Impossible d’envoyer l’e-mail (configuration SMTP ou serveur mail). Réessaie plus tard ou contacte le support.',
+                Response::HTTP_SERVICE_UNAVAILABLE
+            );
+        }
 
         return $this->success(null, 'E-mail de vérification envoyé.');
     }

@@ -26,7 +26,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/auth/logout', [V1AuthController::class, 'logout']);
         Route::get('/auth/me', [V1AuthController::class, 'me']);
         Route::post('/auth/email/resend', [V1AuthController::class, 'resendVerificationEmail'])
-            ->middleware('throttle:6,1');
+            ->middleware('throttle:12,1');
 
         Route::middleware('verified.api')->group(function (): void {
             Route::put('/auth/me', [V1AuthController::class, 'updateMe']);
