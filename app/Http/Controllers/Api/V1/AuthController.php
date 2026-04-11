@@ -109,6 +109,8 @@ class AuthController extends Controller
             return $this->error('Invalid credentials', Response::HTTP_UNAUTHORIZED);
         }
 
+        $user->refresh();
+
         $token = $user->createToken('mobile')->plainTextToken;
 
         return $this->success([
@@ -126,7 +128,11 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return $this->success(new UserResource($request->user()));
+        /** @var User $user */
+        $user = $request->user();
+        $user->refresh();
+
+        return $this->success(new UserResource($user));
     }
 
     public function updateMe(Request $request): JsonResponse

@@ -20,11 +20,21 @@ class User extends Authenticatable implements CanResetPasswordContract, MustVeri
 {
     /** @use HasFactory<UserFactory> */
     use CanResetPassword;
+
     use HasApiTokens;
     use HasFactory;
     use HasUuids;
     use MustVerifyEmailTrait;
     use Notifiable;
+
+    protected static function booted(): void
+    {
+        static::saving(function (User $user): void {
+            if ($user->email !== null && $user->email !== '') {
+                $user->email = strtolower(trim($user->email));
+            }
+        });
+    }
 
     /**
      * @var list<string>

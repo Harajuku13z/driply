@@ -13,12 +13,12 @@ use App\Http\Resources\V1\InspirationResource;
 use App\Jobs\ProcessImportedMediaJob;
 use App\Models\GroupeItem;
 use App\Models\Inspiration;
+use App\Models\User;
 use App\Services\FastServerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\Response;
 
 class InspirationController extends Controller
 {
@@ -26,7 +26,7 @@ class InspirationController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $query = Inspiration::query()->where('user_id', $user->id)->with('groupes');
@@ -51,7 +51,7 @@ class InspirationController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $data = $request->validate([
@@ -90,7 +90,7 @@ class InspirationController extends Controller
 
     public function show(Request $request, string $id): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $inspiration = Inspiration::query()
@@ -103,7 +103,7 @@ class InspirationController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $inspiration = Inspiration::query()->where('user_id', $user->id)->findOrFail($id);
@@ -126,7 +126,7 @@ class InspirationController extends Controller
 
     public function destroy(Request $request, string $id): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $inspiration = Inspiration::query()->where('user_id', $user->id)->findOrFail($id);
@@ -138,7 +138,7 @@ class InspirationController extends Controller
 
     public function toggleFavorite(Request $request, string $id): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $inspiration = Inspiration::query()->where('user_id', $user->id)->findOrFail($id);
@@ -151,7 +151,7 @@ class InspirationController extends Controller
 
     public function import(Request $request, FastServerService $fastServer): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $data = $request->validate([
