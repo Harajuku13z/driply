@@ -20,8 +20,12 @@ class GroupeResource extends JsonResource
             $thumbs = $this->inspirations
                 ->sortBy(fn ($i) => $i->pivot->position ?? 0)
                 ->take(4)
-                ->map(fn ($i) => $i->thumbnail_url)
-                ->filter()
+                ->map(function ($i) {
+                    $u = $i->thumbnail_url;
+
+                    return is_string($u) ? $u : (is_scalar($u) ? (string) $u : null);
+                })
+                ->filter(static fn ($v) => is_string($v) && $v !== '')
                 ->values()
                 ->all();
         }
