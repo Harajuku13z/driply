@@ -160,20 +160,6 @@ class InspirationController extends Controller
             'platform' => ['required', 'string', 'in:tiktok,instagram,youtube,other'],
         ]);
 
-        $fetch = $fastServer->fetchMedia($data['url'], $data['platform']);
-        $disk = 'public';
-        $filename = 'imports/'.Str::uuid()->toString().($fetch['type'] === 'video' ? '.mp4' : '.jpg');
-        $storedPath = $fastServer->downloadMedia($fetch['download_url'], $filename, $disk);
-
-        $thumbPath = null;
-        if (! empty($fetch['thumbnail_url'])) {
-            try {
-                $thumbPath = $fastServer->downloadMedia($fetch['thumbnail_url'], 'imports/thumb-'.Str::uuid()->toString().'.jpg', $disk);
-            } catch (\Throwable) {
-                $thumbPath = null;
-            }
-        }
-
         $type = match ($data['platform']) {
             'tiktok' => InspirationTypeEnum::Tiktok,
             'instagram' => InspirationTypeEnum::Instagram,
@@ -181,24 +167,118 @@ class InspirationController extends Controller
             default => InspirationTypeEnum::Other,
         };
 
+        $isSocialPlatform = in_array($data['platform'], ['tiktok', 'instagram', 'youtube'], true);
+
+        // ── Réseaux sociaux : télécharger via FastServer ──
+        if ($isSocialPlatform) {
+            try {
+                $fetch = $fastServer->fetchMedia($data['url'], $data['platform']);
+            } catch (\Throwable) {
+                $fetch = null;
+            }
+        } else {
+            $fetch = null;
+        }
+
+        $mediaUrl = null;
+        $thumbUrl = null;
+        $title = null;
+        $duration = null;
+        $mediaType = MediaTypeEnum::Image;
+
+        if ($fetch !== null) {
+            // FastServer a renvoyé un résultat : télécharger le média
+            $disk = 'public';
+            $filename = 'imports/'.Str::uuid()->toString().($fetch['type'] === 'video' ? '.mp4' : '.jpg');
+            $storedPath = $fastServer->downloadMedia($fetch['download_url'], $filename, $disk);
+            $mediaUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($storedPath);
+            $mediaType = $fetch['type'] === 'video' ? MediaTypeEnum::Video : MediaTypeEnum::Image;
+            $title = $fetch['title'];
+            $duration = $fetch['duration'];
+
+            if (! empty($fetch['thumbnail_url'])) {
+                try {
+                    $thumbPath = $fastServer->downloadMedia($fetch['thumbnail_url'], 'imports/thumb-'.Str::uuid()->toString().'.jpg', $disk);
+                    $thumbUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($thumbPath);
+                } catch (\Throwable) {
+                    $thumbUrl = $fetch['thumbnail_url'];
+                }
+            }
+        } else {
+            // ── Lien web normal : récupérer les métadonnées OG (titre + image) ──
+            $og = $this->fetchOpenGraphMeta($data['url']);
+            $title = $og['title'];
+            $thumbUrl = $og['image'];
+        }
+
         $inspiration = Inspiration::query()->create([
             'user_id' => $user->id,
             'type' => $type,
             'source_url' => $data['url'],
             'platform' => $data['platform'],
-            'media_url' => LensPublicImageUrl::absoluteFromPublicDiskPath($storedPath),
-            'thumbnail_url' => $thumbPath ? LensPublicImageUrl::absoluteFromPublicDiskPath($thumbPath) : ($fetch['thumbnail_url'] ?? null),
-            'title' => $fetch['title'],
-            'duration_seconds' => $fetch['duration'],
-            'media_type' => $fetch['type'] === 'video' ? MediaTypeEnum::Video : MediaTypeEnum::Image,
+            'media_url' => $mediaUrl,
+            'thumbnail_url' => $thumbUrl,
+            'title' => $title ?: $this->hostFromUrl($data['url']),
+            'duration_seconds' => $duration,
+            'media_type' => $mediaType,
             'status' => InspirationStatusEnum::Processed,
         ]);
 
-        ProcessImportedMediaJob::dispatch($inspiration->id)->afterCommit();
+        if ($fetch !== null) {
+            ProcessImportedMediaJob::dispatch($inspiration->id)->afterCommit();
+        }
 
         $inspiration->load('groupes');
 
         return $this->created((new InspirationResource($inspiration))->resolve(), 'Import créé');
+    }
+
+    /**
+     * Récupère titre + image OG d'une page web (fallback quand FastServer ne supporte pas l'URL).
+     *
+     * @return array{title: string|null, image: string|null}
+     */
+    private function fetchOpenGraphMeta(string $url): array
+    {
+        $result = ['title' => null, 'image' => null];
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::timeout(10)
+                ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
+                ->get($url);
+
+            if ($response->failed()) {
+                return $result;
+            }
+
+            $html = $response->body();
+
+            // og:title
+            if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
+                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            } elseif (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $html, $m)) {
+                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            }
+
+            // og:image
+            if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
+                $img = trim($m[1]);
+                if (filter_var($img, FILTER_VALIDATE_URL)) {
+                    $result['image'] = $img;
+                }
+            }
+        } catch (\Throwable) {
+            // Silencieux : on crée l'inspiration même sans métadonnées
+        }
+
+        return $result;
+    }
+
+    private function hostFromUrl(string $url): string
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return is_string($host) ? $host : 'Lien partagé';
     }
 
     /**
