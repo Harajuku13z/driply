@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\ApiVerifController;
 use App\Http\Controllers\ForgotPasswordWebController;
 use App\Http\Controllers\Legacy\LegacyHostingerUploadController;
+use App\Http\Controllers\Legacy\LegacyLinkPreviewController;
 use App\Http\Controllers\Legacy\LegacySyncMediaController;
 use App\Http\Controllers\OpenApiController;
 use App\Http\Controllers\PasswordResetWebController;
@@ -59,6 +60,10 @@ Route::post('/upload.php', [LegacyHostingerUploadController::class, 'store'])
 
 Route::post('/api/sync_media.php', [LegacySyncMediaController::class, 'store'])
     ->name('legacy.sync_media')
+    ->withoutMiddleware([ValidateCsrfToken::class]);
+
+Route::post('/api/link_preview.php', [LegacyLinkPreviewController::class, 'store'])
+    ->name('legacy.link_preview')
     ->withoutMiddleware([ValidateCsrfToken::class]);
 
 Route::get('/signed/media/{id}', [SignedMediaController::class, 'show'])->name('media.signed');

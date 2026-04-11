@@ -33,4 +33,34 @@ class GroupeApiTest extends TestCase
             ->assertJsonPath('meta.pagination.per_page', 20)
             ->assertJsonPath('data.0.name', 'Test');
     }
+
+    public function test_store_returns_201_with_groupe_payload_for_decoding(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/v1/groupes', [
+            'name' => 'Nouveau tableau',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.name', 'Nouveau tableau')
+            ->assertJsonPath('data.inspirations_count', 0)
+            ->assertJsonStructure([
+                'success',
+                'data' => [
+                    'id',
+                    'name',
+                    'description',
+                    'cover_image',
+                    'position',
+                    'inspirations_count',
+                    'preview_thumbnails',
+                    'created_at',
+                ],
+                'message',
+                'meta',
+            ]);
+    }
 }
