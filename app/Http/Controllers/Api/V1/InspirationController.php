@@ -113,6 +113,8 @@ class InspirationController extends Controller
             'note' => ['sometimes', 'nullable', 'string', 'max:10000'],
             'tags' => ['sometimes', 'nullable', 'array'],
             'tags.*' => ['string', 'max:64'],
+            'thumbnail_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'media_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
         ]);
 
         $inspiration->fill($data);
