@@ -16,7 +16,8 @@ return [
 
     'limits' => [
         'max_items_per_scan' => 3,
-        'max_products_per_item' => (int) env('VISION_MAX_PRODUCTS_PER_ITEM', 15),
+        /** Plafond d’offres renvoyées au client après scoring (le bouton « Voir plus » affiche le lot suivant côté app). */
+        'max_products_per_item' => (int) env('VISION_MAX_PRODUCTS_PER_ITEM', 45),
         'max_raw_results' => (int) env('VISION_MAX_RAW_RESULTS', 30),
         'min_results_before_fallback' => 3,
         /** Nombre de requêtes Shopping distinctes générées à partir des titres Lens (plus = plus de résultats, plus d’appels SerpApi). */
@@ -25,6 +26,11 @@ return [
         'max_candidates_after_dedup' => (int) env('VISION_MAX_CANDIDATES_AFTER_DEDUP', 40),
         /** Minimum d’offres renvoyées pour valider un scan (sinon erreur 422). */
         'min_scan_results' => (int) env('VISION_MIN_SCAN_RESULTS', 10),
+        /**
+         * Grand côté cible pour les URLs d’image Google (lh3.googleusercontent, gstatic =w/-h/, =s/).
+         * Les miniatures SerpAPI petites sont « upscalées » dans l’URL quand le CDN le permet.
+         */
+        'max_google_image_edge' => (int) env('VISION_MAX_GOOGLE_IMAGE_EDGE', 1600),
     ],
 
     'weights' => [

@@ -123,12 +123,13 @@ class DeduplicationService
             $existing['price'] = $duplicate['price'];
         }
 
-        // Garder l'image si disponible (priorite Lens)
-        if (($existing['image_url'] ?? null) === null && ($duplicate['image_url'] ?? null) !== null) {
-            $existing['image_url'] = $duplicate['image_url'];
-        }
-        if (($duplicate['source'] ?? '') === 'google_lens' && ($duplicate['image_url'] ?? null) !== null) {
-            $existing['image_url'] = $duplicate['image_url'];
+        // Garder l’URL d’image la plus grande (meilleure qualité d’aperçu).
+        $existingImg = trim((string) ($existing['image_url'] ?? ''));
+        $dupImg = trim((string) ($duplicate['image_url'] ?? ''));
+        if ($dupImg !== '') {
+            if ($existingImg === '' || SerpApiImageUrlSelector::scoreUrl($dupImg) > SerpApiImageUrlSelector::scoreUrl($existingImg)) {
+                $existing['image_url'] = $duplicate['image_url'];
+            }
         }
 
         // Merger les metadata

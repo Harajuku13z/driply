@@ -51,13 +51,14 @@ class GoogleShoppingService
 
             $results = [];
             foreach (array_slice($shoppingResults, 0, $maxResults) as $item) {
+                $bestThumb = $this->bestShoppingImageUrl($item);
                 $results[] = [
                     'source'           => 'google_shopping',
                     'title'            => (string) ($item['title'] ?? ''),
                     'price'            => $this->extractPrice($item),
                     'currency'         => (string) ($item['extracted_price']['currency'] ?? 'EUR'),
                     'link'             => (string) ($item['link'] ?? $item['product_link'] ?? ''),
-                    'thumbnail'        => (string) ($item['thumbnail'] ?? ''),
+                    'thumbnail'        => $bestThumb,
                     'source_name'      => (string) ($item['source'] ?? ''),
                     'in_stock'         => isset($item['delivery']) ? true : null,
                     'similarity_score' => null,
@@ -70,6 +71,18 @@ class GoogleShoppingService
             Log::error('GoogleShopping: exception', ['error' => $e->getMessage(), 'query' => $query]);
             return [];
         }
+    }
+
+    /**
+     * Préfère les URLs SerpAPI (souvent plus nettes / plus grandes) au thumbnail gstatic.
+     *
+     * @param  array<string, mixed>  $item
+     */
+    private function bestShoppingImageUrl(array $item): string
+    {
+        return SerpApiImageUrlSelector::pickBest(
+            SerpApiImageUrlSelector::shoppingImageCandidates($item)
+        );
     }
 
     private function extractPrice(array $item): ?float

@@ -25,6 +25,7 @@ class NormalizationService
             $title    = trim((string) ($raw['title'] ?? ''));
             $link     = trim((string) ($raw['link'] ?? ''));
             $merchant = $this->extractMerchant($link, (string) ($raw['source_name'] ?? ''));
+            $imageUrl = $this->resolveBestImageUrl($raw);
 
             $normalized[] = [
                 'id'               => Str::uuid()->toString(),
@@ -37,7 +38,7 @@ class NormalizationService
                 'currency'         => (string) ($raw['currency'] ?? 'EUR'),
                 'merchant'         => $merchant,
                 'product_url'      => $link !== '' ? $link : null,
-                'image_url'        => trim((string) ($raw['thumbnail'] ?? '')) ?: null,
+                'image_url'        => $imageUrl,
                 'in_stock'         => $raw['in_stock'] ?? null,
                 'similarity_score' => isset($raw['similarity_score']) ? (float) $raw['similarity_score'] : null,
                 'semantic_score'   => null,
@@ -48,6 +49,45 @@ class NormalizationService
         }
 
         return $normalized;
+    }
+
+    /**
+     * Choisit la meilleure URL d’image disponible (Lens : champ `image` ; Shopping : serpapi_thumbnails).
+     *
+     * @param  array<string, mixed>  $raw
+     */
+    private function resolveBestImageUrl(array $raw): ?string
+    {
+        $fallback = trim((string) ($raw['thumbnail'] ?? ''));
+        $nested = $raw['raw'] ?? null;
+        if (! is_array($nested)) {
+            return $fallback !== '' ? $fallback : null;
+        }
+
+        if (($raw['source'] ?? '') === 'google_shopping') {
+            $best = $this->bestGoogleShoppingImageFromItem($nested);
+
+            return $best !== '' ? $best : ($fallback !== '' ? $fallback : null);
+        }
+
+        $best = SerpApiImageUrlSelector::pickBest(
+            array_merge(
+                SerpApiImageUrlSelector::lensVisualMatchCandidates($nested),
+                $fallback !== '' ? [$fallback] : []
+            )
+        );
+
+        return $best !== '' ? $best : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function bestGoogleShoppingImageFromItem(array $item): string
+    {
+        return SerpApiImageUrlSelector::pickBest(
+            SerpApiImageUrlSelector::shoppingImageCandidates($item)
+        );
     }
 
     /**

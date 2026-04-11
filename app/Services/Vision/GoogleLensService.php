@@ -57,13 +57,16 @@ class GoogleLensService
 
             $results = [];
             foreach (array_slice($visualMatches, 0, $maxResults) as $match) {
+                $bestVisual = SerpApiImageUrlSelector::pickBest(
+                    SerpApiImageUrlSelector::lensVisualMatchCandidates($match)
+                );
                 $results[] = [
                     'source'           => 'google_lens',
                     'title'            => (string) ($match['title'] ?? ''),
                     'price'            => $this->extractPrice($match),
                     'currency'         => $this->extractCurrency($match),
                     'link'             => (string) ($match['link'] ?? ''),
-                    'thumbnail'        => (string) ($match['thumbnail'] ?? ''),
+                    'thumbnail'        => $bestVisual,
                     'source_name'      => (string) ($match['source'] ?? ''),
                     'in_stock'         => null,
                     'similarity_score' => isset($match['position']) ? max(0, 100 - (int) $match['position'] * 5) : null,
