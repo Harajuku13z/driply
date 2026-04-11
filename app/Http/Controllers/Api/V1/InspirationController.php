@@ -200,4 +200,52 @@ class InspirationController extends Controller
 
         return $this->created((new InspirationResource($inspiration))->resolve(), 'Import créé');
     }
+
+    /**
+     * Upload direct d'une image (partage Instagram, photo galerie) — pas d'analyse Lens, création immédiate.
+     */
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $request->validate([
+            'image' => ['required', 'file', 'image', 'max:15360'],
+            'title' => ['nullable', 'string', 'max:500'],
+            'source_url' => ['nullable', 'string', 'max:2048'],
+            'platform' => ['nullable', 'string', 'in:instagram,tiktok,youtube,other'],
+        ]);
+
+        $file = $request->file('image');
+        $extension = $file->getClientOriginalExtension() ?: 'jpg';
+        $path = 'imports/'.Str::uuid()->toString().'.'.$extension;
+
+        Storage::disk('public')->put($path, (string) file_get_contents($file->getRealPath()));
+
+        $publicUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($path);
+
+        $platform = $request->input('platform', 'other');
+        $type = match ($platform) {
+            'instagram' => InspirationTypeEnum::Instagram,
+            'tiktok' => InspirationTypeEnum::Tiktok,
+            'youtube' => InspirationTypeEnum::Youtube,
+            default => InspirationTypeEnum::Photo,
+        };
+
+        $inspiration = Inspiration::query()->create([
+            'user_id' => $user->id,
+            'type' => $type,
+            'title' => $request->input('title', 'Photo partagée'),
+            'thumbnail_url' => $publicUrl,
+            'media_url' => $publicUrl,
+            'source_url' => $request->input('source_url'),
+            'platform' => $platform,
+            'media_type' => MediaTypeEnum::Image,
+            'status' => InspirationStatusEnum::Processed,
+        ]);
+
+        $inspiration->load('groupes');
+
+        return $this->created((new InspirationResource($inspiration))->resolve(), 'Photo enregistrée dans Mes look');
+    }
 }

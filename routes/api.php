@@ -55,6 +55,8 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('throttle:scan-import');
             Route::post('/inspirations/import', [V1InspirationController::class, 'import'])
                 ->middleware('throttle:scan-import');
+            Route::post('/inspirations/upload-photo', [V1InspirationController::class, 'uploadPhoto'])
+                ->middleware('throttle:scan-import');
             Route::get('/inspirations/{id}', [V1InspirationController::class, 'show']);
             Route::put('/inspirations/{id}', [V1InspirationController::class, 'update']);
             Route::delete('/inspirations/{id}', [V1InspirationController::class, 'destroy']);
