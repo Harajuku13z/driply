@@ -18,9 +18,9 @@ Route::view('/', 'home');
 
 Route::view('/politique-de-confidentialite', 'legal.privacy')->name('legal.privacy');
 
-// Images Lens + captures scan API : fonctionne sans `php artisan storage:link`.
+// Images Lens + captures scan + imports API : fonctionne sans `php artisan storage:link`.
 Route::get('/driply-public/{path}', [PublicDiskFileController::class, 'show'])
-    ->where('path', '(lens|scans)/.+')
+    ->where('path', '(lens|scans|imports)/.+')
     ->name('driply.public.storage');
 
 // Demande de lien (e-mail) — même effet que POST /api/forgot-password.
