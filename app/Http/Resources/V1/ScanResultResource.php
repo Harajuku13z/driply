@@ -23,7 +23,7 @@ class ScanResultResource extends JsonResource
             'id'                 => $this->id,
             'type'               => $this->type?->value ?? 'scan',
             'title'              => $this->title,
-            'thumbnail_url'      => $this->thumbnail_url,
+            'thumbnail_url'      => $this->resolvedListThumbnailUrl(),
             'scan_query'         => $this->scan_query,
             'scan_item_type'     => $this->scan_item_type,
             'scan_brand'         => $this->scan_brand,

@@ -21,7 +21,7 @@ class GroupeResource extends JsonResource
                 ->sortBy(fn ($i) => $i->pivot->position ?? 0)
                 ->take(4)
                 ->map(function ($i) {
-                    $u = $i->thumbnail_url;
+                    $u = $i->resolvedListThumbnailUrl();
 
                     return is_string($u) ? $u : (is_scalar($u) ? (string) $u : null);
                 })

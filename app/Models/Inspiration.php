@@ -87,4 +87,39 @@ class Inspiration extends Model
             ->withPivot(['id', 'position', 'note', 'added_at'])
             ->orderByPivot('position');
     }
+
+    /**
+     * URL affichable en liste / grille : `thumbnail_url` colonne, sinon `media_url`, sinon première image dans `scan_results`.
+     */
+    public function resolvedListThumbnailUrl(): ?string
+    {
+        $thumb = trim((string) ($this->thumbnail_url ?? ''));
+        if ($thumb !== '') {
+            return $this->thumbnail_url;
+        }
+
+        $media = trim((string) ($this->media_url ?? ''));
+        if ($media !== '') {
+            return $this->media_url;
+        }
+
+        $results = $this->scan_results;
+        if (! is_array($results)) {
+            return null;
+        }
+
+        foreach ($results as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            foreach (['thumbnail_url', 'thumbnail', 'image_url', 'image'] as $key) {
+                $candidate = trim((string) ($row[$key] ?? ''));
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
 }

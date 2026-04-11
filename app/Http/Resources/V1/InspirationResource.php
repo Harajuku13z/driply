@@ -21,7 +21,7 @@ class InspirationResource extends JsonResource
             'id' => $this->id,
             'type' => $type,
             'title' => $this->title,
-            'thumbnail_url' => $this->thumbnail_url,
+            'thumbnail_url' => $this->resolvedListThumbnailUrl(),
             'note' => $this->note,
             'tags' => $this->tags ?? [],
             'is_favorite' => (bool) $this->is_favorite,

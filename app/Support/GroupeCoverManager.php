@@ -33,7 +33,8 @@ final class GroupeCoverManager
         $stillPresent = false;
         foreach ($groupe->groupeItems as $gi) {
             $insp = $gi->inspiration;
-            if ($insp && (string) $insp->thumbnail_url === (string) $groupe->cover_image) {
+            $resolved = $insp?->resolvedListThumbnailUrl();
+            if ($resolved !== null && (string) $resolved === (string) $groupe->cover_image) {
                 $stillPresent = true;
                 break;
             }
@@ -54,7 +55,7 @@ final class GroupeCoverManager
     {
         $items = $groupe->groupeItems->sortBy('position')->values();
         foreach ($items as $gi) {
-            $t = $gi->inspiration?->thumbnail_url;
+            $t = $gi->inspiration?->resolvedListThumbnailUrl();
             if (is_string($t) && $t !== '') {
                 return $t;
             }
@@ -80,7 +81,7 @@ final class GroupeCoverManager
         ]);
 
         if ($groupe->cover_image === null || $groupe->cover_image === '') {
-            $thumb = $inspiration->thumbnail_url;
+            $thumb = $inspiration->resolvedListThumbnailUrl();
             if (is_string($thumb) && $thumb !== '') {
                 $groupe->cover_image = $thumb;
                 $groupe->saveQuietly();
