@@ -91,7 +91,10 @@ class AuthController extends Controller
         $user = $request->user();
 
         if ($user->hasVerifiedEmail()) {
-            return $this->success(['already_verified' => true], 'E-mail déjà vérifié.');
+            return $this->success([
+                'already_verified' => true,
+                'user' => new UserResource($user->fresh()),
+            ], 'E-mail déjà vérifié.');
         }
 
         try {
