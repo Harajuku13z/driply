@@ -20,7 +20,7 @@ final class LensPublicImageUrl
 
         $relative = ltrim($relativeOrAbsolute, '/');
 
-        if (self::useRoute() && (str_starts_with($relative, 'lens/') || str_starts_with($relative, 'scans/'))) {
+        if (self::useRoute() && (str_starts_with($relative, 'lens/') || str_starts_with($relative, 'scans/') || str_starts_with($relative, 'imports/'))) {
             return url('/driply-public/'.$relative);
         }
 

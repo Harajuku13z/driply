@@ -15,6 +15,7 @@ use App\Models\GroupeItem;
 use App\Models\Inspiration;
 use App\Models\User;
 use App\Services\FastServerService;
+use App\Support\LensPublicImageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -185,8 +186,8 @@ class InspirationController extends Controller
             'type' => $type,
             'source_url' => $data['url'],
             'platform' => $data['platform'],
-            'media_url' => Storage::disk($disk)->url($storedPath),
-            'thumbnail_url' => $thumbPath ? Storage::disk($disk)->url($thumbPath) : ($fetch['thumbnail_url'] ?? null),
+            'media_url' => LensPublicImageUrl::absoluteFromPublicDiskPath($storedPath),
+            'thumbnail_url' => $thumbPath ? LensPublicImageUrl::absoluteFromPublicDiskPath($thumbPath) : ($fetch['thumbnail_url'] ?? null),
             'title' => $fetch['title'],
             'duration_seconds' => $fetch['duration'],
             'media_type' => $fetch['type'] === 'video' ? MediaTypeEnum::Video : MediaTypeEnum::Image,

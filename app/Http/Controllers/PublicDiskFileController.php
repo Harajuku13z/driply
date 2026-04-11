@@ -22,7 +22,7 @@ class PublicDiskFileController extends Controller
         if ($path === '' || str_contains($path, '..')) {
             abort(404);
         }
-        if (! str_starts_with($path, 'lens/') && ! str_starts_with($path, 'scans/')) {
+        if (! str_starts_with($path, 'lens/') && ! str_starts_with($path, 'scans/') && ! str_starts_with($path, 'imports/')) {
             abort(404);
         }
 
