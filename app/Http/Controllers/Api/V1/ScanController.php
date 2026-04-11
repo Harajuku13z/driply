@@ -6,16 +6,16 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\InspirationStatusEnum;
 use App\Enums\InspirationTypeEnum;
+use App\Exceptions\InspirationAnalysisException;
 use App\Http\Controllers\Concerns\ApiResponses;
 use App\Http\Controllers\Controller;
-use App\Http\Resources\V1\InspirationResource;
+use App\Http\Resources\V1\ScanResultResource;
 use App\Models\Inspiration;
-use App\Services\DriplyV1ScanAnalysisService;
-use App\Services\GoogleLensService;
-use App\Services\GoogleShoppingService;
+use App\Services\Vision\OutfitSearchPipeline;
 use App\Support\LensPublicImageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -24,9 +24,7 @@ class ScanController extends Controller
     use ApiResponses;
 
     public function __construct(
-        private readonly GoogleLensService $lens,
-        private readonly GoogleShoppingService $shopping,
-        private readonly DriplyV1ScanAnalysisService $priceV1,
+        private readonly OutfitSearchPipeline $pipeline,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -38,56 +36,63 @@ class ScanController extends Controller
             'image' => ['required', 'file', 'image', 'max:15360'],
         ]);
 
+        // ── Upload de l'image ──
         $file = $request->file('image');
-        $path = 'scans/'.Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
+        $extension = $file->getClientOriginalExtension() ?: 'jpg';
+        $path = 'scans/' . Str::uuid()->toString() . '.' . $extension;
+
         Storage::disk('public')->put($path, (string) file_get_contents($file->getRealPath()));
 
         $publicUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($path);
 
-        $lensRaw = $this->lens->analyzeImage($publicUrl);
-        $products = $this->lens->extractProducts($lensRaw);
+        // ── Conversion base64 pour GPT-4o Vision ──
+        $imageContent = (string) file_get_contents($file->getRealPath());
+        $base64Image  = base64_encode($imageContent);
+        $mimeType     = $file->getMimeType() ?: 'image/jpeg';
 
-        $shoppingQuery = 'vêtement mode';
-        if ($products !== []) {
-            $shoppingQuery = (string) ($products[0]['title'] ?? $shoppingQuery);
-        }
+        try {
+            // ── Pipeline complet (9 etapes) ──
+            $result = $this->pipeline->execute($publicUrl, $base64Image, $mimeType);
 
-        if (count($products) < 5) {
-            $extra = $this->shopping->search($shoppingQuery, 12);
-            $products = array_merge($products, $extra);
-        }
-
-        $currency = $user->currency ?? 'EUR';
-        $analysis = $this->priceV1->analyze($products, $currency);
-
-        $firstThumb = '';
-        foreach ($analysis['scan_results'] as $row) {
-            if (is_array($row) && ! empty($row['thumbnail'])) {
-                $firstThumb = (string) $row['thumbnail'];
-                break;
+            // ── Thumbnail : premiere image trouvee ou l'upload ──
+            $thumbnail = $publicUrl;
+            foreach ($result['scan_results'] as $product) {
+                if (! empty($product['image_url'])) {
+                    $thumbnail = (string) $product['image_url'];
+                    break;
+                }
             }
+
+            // ── Sauvegarde en base ──
+            $inspiration = Inspiration::query()->create([
+                'user_id'            => $user->id,
+                'type'               => InspirationTypeEnum::Scan,
+                'scan_query'         => $result['query'],
+                'scan_item_type'     => $result['item_type'],
+                'scan_brand'         => $result['brand'],
+                'scan_color'         => $result['color'],
+                'scan_results'       => $result['scan_results'],
+                'scan_price_summary' => $result['scan_price_summary'],
+                'thumbnail_url'      => $thumbnail,
+                'title'              => $result['item_type'],
+                'status'             => InspirationStatusEnum::Processed,
+            ]);
+
+            $inspiration->load('groupes');
+
+            return $this->created([
+                'inspiration' => (new ScanResultResource($inspiration))->resolve(),
+            ], 'Scan analyse avec succes.');
+
+        } catch (InspirationAnalysisException $e) {
+            return $this->error($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            Log::error('ScanController: erreur pipeline', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->error('Une erreur est survenue lors de l\'analyse. Reessaie.', 500);
         }
-
-        $inspiration = Inspiration::query()->create([
-            'user_id' => $user->id,
-            'type' => InspirationTypeEnum::Scan,
-            'scan_query' => $shoppingQuery,
-            'scan_item_type' => $analysis['item_type'],
-            'scan_brand' => $analysis['brand'],
-            'scan_color' => $analysis['color'],
-            'scan_results' => $analysis['scan_results'],
-            'scan_price_summary' => $analysis['scan_price_summary'],
-            'thumbnail_url' => $firstThumb !== '' ? $firstThumb : $publicUrl,
-            'title' => $analysis['item_type'],
-            'status' => InspirationStatusEnum::Processed,
-        ]);
-
-        $inspiration->load('groupes');
-
-        return $this->created([
-            'inspiration' => (new InspirationResource($inspiration))->resolve(),
-            'lens_raw' => $lensRaw,
-            'analysis' => $analysis,
-        ], 'Scan enregistré');
     }
 }
