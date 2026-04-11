@@ -7,7 +7,8 @@ namespace App\Support;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * URL publique des scans Lens : préfère /driply-public/lens/… pour éviter 403 sur /storage/ (symlink, hébergeur).
+ * URL publique des images pour SerpAPI (Lens) : préfère /driply-public/lens/… et /driply-public/scans/…
+ * pour éviter 403 sur /storage/ (symlink manquant sur l’hébergeur). Les uploads scan API utilisent `scans/`.
  */
 final class LensPublicImageUrl
 {
@@ -19,7 +20,7 @@ final class LensPublicImageUrl
 
         $relative = ltrim($relativeOrAbsolute, '/');
 
-        if (self::useRoute() && str_starts_with($relative, 'lens/')) {
+        if (self::useRoute() && (str_starts_with($relative, 'lens/') || str_starts_with($relative, 'scans/'))) {
             return url('/driply-public/'.$relative);
         }
 

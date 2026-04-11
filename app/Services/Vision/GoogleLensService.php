@@ -48,6 +48,13 @@ class GoogleLensService
 
             $visualMatches = $data['visual_matches'] ?? [];
 
+            if ($visualMatches === [] && ! empty($data['error'])) {
+                Log::warning('GoogleLens: reponse SerpAPI sans visual_matches', [
+                    'error' => $data['error'],
+                    'image_url' => $imageUrl,
+                ]);
+            }
+
             $results = [];
             foreach (array_slice($visualMatches, 0, $maxResults) as $match) {
                 $results[] = [

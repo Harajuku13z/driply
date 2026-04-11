@@ -9,12 +9,12 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 /**
  * Sert les fichiers du disque `public` via PHP (sans lien symbolique public/storage).
- * Utilisé pour les images Lens envoyées à SerpAPI lorsque /storage/… n’est pas joignable.
+ * Utilisé pour les images envoyées à SerpAPI lorsque /storage/… n’est pas joignable.
  */
 class PublicDiskFileController extends Controller
 {
     /**
-     * GET /driply-public/{path}  path autorisé : lens/… uniquement
+     * GET /driply-public/{path}  chemins autorisés : lens/…, scans/…
      */
     public function show(string $path): SymfonyResponse
     {
@@ -22,7 +22,7 @@ class PublicDiskFileController extends Controller
         if ($path === '' || str_contains($path, '..')) {
             abort(404);
         }
-        if (! str_starts_with($path, 'lens/')) {
+        if (! str_starts_with($path, 'lens/') && ! str_starts_with($path, 'scans/')) {
             abort(404);
         }
 

@@ -26,4 +26,15 @@ class PublicDiskLensFileTest extends TestCase
 
         $this->get('/driply-public/lens/../.env')->assertNotFound();
     }
+
+    public function test_driply_public_route_serves_scan_file_from_public_disk(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('scans/test-capture.jpg', 'fake-scan');
+
+        $response = $this->get('/driply-public/scans/test-capture.jpg');
+
+        $response->assertOk();
+        $this->assertSame('fake-scan', $response->streamedContent());
+    }
 }
