@@ -38,7 +38,7 @@ class DashboardController extends Controller
             ->where('user_id', $user->id)
             ->with('groupes')
             ->orderByDesc('created_at')
-            ->limit(8)
+            ->limit(4)
             ->get();
 
         $recentGroupes = Groupe::query()
