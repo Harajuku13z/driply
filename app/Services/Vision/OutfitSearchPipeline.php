@@ -9,14 +9,13 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Pipeline principal : selon `vision.scan_driver`, soit le package Node SerpApi (capture),
- * soit l’ancienne chaîne GPT-4o Vision + services PHP.
+ * Pipeline principal : selon `vision.scan_driver`.
+ * Par défaut **legacy** (GPT-4o Vision + SerpApi HTTP en PHP, sans Node).
+ * Option **serpapi** : script Node pour un flux Lens+Shopping unifié (hébergement avec `node`).
  */
 class OutfitSearchPipeline
 {
     public function __construct(
-        private readonly ImageAnalysisService $imageAnalysis,
-        private readonly QueryGenerationService $queryGeneration,
         private readonly GoogleLensService $lens,
         private readonly GoogleShoppingService $shopping,
         private readonly NormalizationService $normalization,
@@ -40,7 +39,7 @@ class OutfitSearchPipeline
      */
     public function execute(string $imageUrl, string $base64Image, string $mimeType = 'image/jpeg'): array
     {
-        $driver = (string) config('vision.scan_driver', 'serpapi');
+        $driver = (string) config('vision.scan_driver', 'legacy');
 
         if ($driver === 'serpapi') {
             return $this->executeSerpApiNode($imageUrl);
@@ -184,57 +183,45 @@ class OutfitSearchPipeline
     {
         $debug = (bool) config('vision.debug_mode', false);
 
-        $analysis = $this->imageAnalysis->analyze($base64Image, $mimeType);
+        // Photo → Google Lens (SerpApi) une seule fois, puis Shopping à partir des titres trouvés (pas d’OpenAI).
+        $lensResults = $this->lens->searchByImage($imageUrl);
 
         if ($debug) {
-            Log::info('Pipeline: analyse GPT-4o', ['analysis' => $analysis]);
+            Log::info('Pipeline: Google Lens (image)', ['count' => count($lensResults)]);
         }
 
-        $queries = $this->queryGeneration->generate($analysis);
-
-        if ($queries === []) {
-            throw new InspirationAnalysisException('Aucun vetement detecte dans l\'image.');
+        if ($lensResults === []) {
+            throw new InspirationAnalysisException('Aucun resultat visuel pour cette image. Verifie que l\'URL de la photo est publique et que SERPAPI_KEY est valide.');
         }
 
-        $primaryItem = $analysis['items'][0] ?? [];
-        $itemType = (string) ($primaryItem['type'] ?? 'vetement');
-        $brand = isset($primaryItem['brand']) ? (string) $primaryItem['brand'] : null;
-        $color = isset($primaryItem['color']) ? (string) $primaryItem['color'] : null;
+        $shoppingQueries = $this->shoppingQueriesFromLensResults($lensResults);
 
-        $allRawResults = [];
-        $mainQuery = '';
+        $allRawResults = $lensResults;
+        $mainQuery = $shoppingQueries[0] ?? '';
 
-        foreach ($queries as $querySet) {
-            $lensResults = $this->lens->searchByImage($imageUrl);
-            $allRawResults = array_merge($allRawResults, $lensResults);
+        foreach ($shoppingQueries as $q) {
+            $shoppingChunk = $this->shopping->searchByQuery($q);
+            $allRawResults = array_merge($allRawResults, $shoppingChunk);
 
-            $mainQuery = $querySet['primary'];
-            $shoppingResults = $this->shopping->searchByQuery($mainQuery);
-            $allRawResults = array_merge($allRawResults, $shoppingResults);
-
-            $minResults = (int) config('vision.limits.min_results_before_fallback', 3);
-            if (count($allRawResults) < $minResults) {
-                $fallbackResults = $this->shopping->searchByQuery($querySet['fallback']);
-                $allRawResults = array_merge($allRawResults, $fallbackResults);
-
-                if ($debug) {
-                    Log::info('Pipeline: fallback active', ['query' => $querySet['fallback'], 'count' => count($fallbackResults)]);
-                }
+            if ($debug) {
+                Log::info('Pipeline: Google Shopping', ['query' => $q, 'count' => count($shoppingChunk)]);
             }
-
-            break;
         }
 
         if ($debug) {
-            Log::info('Pipeline: resultats bruts', ['count' => count($allRawResults)]);
+            Log::info('Pipeline: resultats bruts fusionnes', ['count' => count($allRawResults)]);
         }
+
+        $itemType = $this->itemLabelFromLens($lensResults[0] ?? []);
+        $brand = $this->brandHintFromLens($lensResults[0] ?? []);
+        $analysis = $this->buildAnalysisStubForLens($itemType);
 
         $normalized = $this->normalization->normalize($allRawResults);
         $deduplicated = $this->deduplication->deduplicate($normalized);
         $scored = $this->scoring->score($deduplicated, $analysis);
 
-        $maxProducts = (int) config('vision.limits.max_products_per_item', 5);
-        $finalProducts = array_slice($scored, 0, $maxProducts);
+        $maxProducts = (int) config('vision.limits.max_products_per_item', 15);
+        $finalProducts = array_slice($scored, 0, max(1, $maxProducts));
 
         $priceSummary = $this->buildPriceSummary($finalProducts);
 
@@ -244,8 +231,111 @@ class OutfitSearchPipeline
             'scan_price_summary' => $priceSummary,
             'item_type' => $itemType,
             'brand' => $brand,
-            'color' => $color,
+            'color' => null,
             'query' => $mainQuery,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $lensResults
+     * @return list<string>
+     */
+    private function shoppingQueriesFromLensResults(array $lensResults): array
+    {
+        $maxQ = max(1, (int) config('vision.limits.max_shopping_queries_from_lens', 5));
+        $seen = [];
+        $queries = [];
+
+        foreach ($lensResults as $match) {
+            if (count($queries) >= $maxQ) {
+                break;
+            }
+            $q = $this->cleanTitleForShoppingQuery((string) ($match['title'] ?? ''));
+            if (mb_strlen($q) < 4) {
+                continue;
+            }
+            $k = mb_strtolower($q);
+            if (isset($seen[$k])) {
+                continue;
+            }
+            $seen[$k] = true;
+            $queries[] = $q;
+        }
+
+        return $queries;
+    }
+
+    private function cleanTitleForShoppingQuery(string $title): string
+    {
+        $title = trim(preg_replace('/\s+/', ' ', $title) ?? $title);
+        if ($title === '') {
+            return '';
+        }
+        foreach ([' | ', ' — ', ' – ', ' - '] as $sep) {
+            $p = strpos($title, $sep);
+            if ($p !== false && $p > 12) {
+                $title = trim(substr($title, 0, $p));
+                break;
+            }
+        }
+        if (mb_strlen($title) > 90) {
+            $title = mb_substr($title, 0, 90);
+            $title = trim((string) preg_replace('/\s+\S*$/u', '', $title));
+        }
+
+        return trim($title);
+    }
+
+    /**
+     * @param  array<string, mixed>  $firstLens
+     */
+    private function itemLabelFromLens(array $firstLens): string
+    {
+        $t = trim((string) ($firstLens['title'] ?? ''));
+        if ($t === '') {
+            return 'vetement';
+        }
+        $words = preg_split('/\s+/', $t) ?: [];
+        $words = array_values(array_filter($words, fn (string $w) => $w !== ''));
+        $words = array_slice($words, 0, 5);
+
+        return implode(' ', $words) ?: 'vetement';
+    }
+
+    /**
+     * @param  array<string, mixed>  $firstLens
+     */
+    private function brandHintFromLens(array $firstLens): ?string
+    {
+        $s = trim((string) ($firstLens['source_name'] ?? ''));
+        if ($s === '') {
+            return null;
+        }
+        if (strlen($s) > 60) {
+            return substr($s, 0, 57).'...';
+        }
+
+        return $s;
+    }
+
+    /**
+     * @return array{style: list<string>, colors: list<string>, gender: string, items: list<array{type: string, color: ?string, material: ?string, brand: ?string, confidence: float}>}
+     */
+    private function buildAnalysisStubForLens(string $itemType): array
+    {
+        return [
+            'style' => [],
+            'colors' => [],
+            'gender' => 'unisexe',
+            'items' => [
+                [
+                    'type' => $itemType,
+                    'color' => null,
+                    'material' => null,
+                    'brand' => null,
+                    'confidence' => 0.85,
+                ],
+            ],
         ];
     }
 

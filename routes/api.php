@@ -51,6 +51,8 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/inspirations', [V1InspirationController::class, 'store']);
             Route::post('/inspirations/scan', [V1ScanController::class, 'store'])
                 ->middleware('throttle:scan-import');
+            Route::post('/inspirations/scan/confirm', [V1ScanController::class, 'confirm'])
+                ->middleware('throttle:scan-import');
             Route::post('/inspirations/import', [V1InspirationController::class, 'import'])
                 ->middleware('throttle:scan-import');
             Route::get('/inspirations/{id}', [V1InspirationController::class, 'show']);

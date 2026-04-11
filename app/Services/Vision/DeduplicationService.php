@@ -34,7 +34,9 @@ class DeduplicationService
             }
         }
 
-        return array_slice($unique, 0, 15);
+        $cap = max(5, (int) config('vision.limits.max_candidates_after_dedup', 40));
+
+        return array_slice($unique, 0, $cap);
     }
 
     /**
@@ -56,12 +58,21 @@ class DeduplicationService
                 return $index;
             }
 
-            // Critere 2 : meme marchand + prix identique (+-5%)
+            // Deux fiches avec des liens produit distincts = offres differentes (ne pas fusionner
+            // sur titre / prix : sinon tout Google Shopping pour la meme robe devient 1 seule ligne).
+            if ($productUrl !== '' && $existingUrl !== '' && $productUrl !== $existingUrl) {
+                continue;
+            }
+
+            $bothUrlsEmpty = $productUrl === '' && $existingUrl === '';
+
+            // Critere 2 : meme marchand + prix identique (+-5%) — uniquement sans URL pour dedoublonner
             $existingMerchant = strtolower((string) ($item['merchant'] ?? ''));
             $existingPrice = (float) ($item['price'] ?? 0);
 
             if (
-                $productMerchant !== ''
+                $bothUrlsEmpty
+                && $productMerchant !== ''
                 && $existingMerchant !== ''
                 && $productMerchant === $existingMerchant
                 && $productPrice > 0
@@ -71,9 +82,9 @@ class DeduplicationService
                 return $index;
             }
 
-            // Critere 3 : titre similaire 85%+ ET meme fourchette de prix
+            // Critere 3 : titre tres proche — uniquement si aucune URL (sinon le lien fait foi)
             $existingTitle = (string) ($item['normalized_title'] ?? '');
-            if ($productTitle !== '' && $existingTitle !== '') {
+            if ($bothUrlsEmpty && $productTitle !== '' && $existingTitle !== '') {
                 $similarity = 0;
                 similar_text($productTitle, $existingTitle, $similarity);
 

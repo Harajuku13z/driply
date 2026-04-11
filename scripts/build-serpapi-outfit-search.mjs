@@ -1,5 +1,6 @@
 /**
- * Après `npm install`, compile le package lié si `dist/` est absent.
+ * Optionnel : uniquement si `VISION_SCAN_DRIVER=serpapi` et le paquet est présent dans node_modules.
+ * Lancer depuis Driply-api : `npm run build:serpapi-outfit` (nécessite Node + dépendance @driply/serpapi-outfit-search).
  */
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -11,7 +12,7 @@ const pkg = join(root, 'node_modules', '@driply', 'serpapi-outfit-search');
 
 if (!existsSync(pkg)) {
   process.stderr.write(
-    '[driply-api] @driply/serpapi-outfit-search absent — lancez npm install depuis Driply-api.\n'
+    '[driply-api] @driply/serpapi-outfit-search absent — normal en mode legacy (sans Node). Pour le driver serpapi, liez le paquet puis `npm run build:serpapi-outfit`.\n'
   );
   process.exit(0);
 }

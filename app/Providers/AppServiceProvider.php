@@ -22,10 +22,8 @@ use App\Services\SerpApiService;
 use App\Services\Vision\DeduplicationService;
 use App\Services\Vision\GoogleLensService as VisionGoogleLensService;
 use App\Services\Vision\GoogleShoppingService as VisionGoogleShoppingService;
-use App\Services\Vision\ImageAnalysisService;
 use App\Services\Vision\NormalizationService;
 use App\Services\Vision\OutfitSearchPipeline;
-use App\Services\Vision\QueryGenerationService;
 use App\Services\Vision\ScoringService;
 use App\Services\Vision\SerpApiOutfitSearchRunner;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -60,8 +58,6 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(PHashService::class);
 
         // Vision pipeline services (V2)
-        $this->app->singleton(ImageAnalysisService::class);
-        $this->app->singleton(QueryGenerationService::class);
         $this->app->singleton(VisionGoogleLensService::class);
         $this->app->singleton(VisionGoogleShoppingService::class);
         $this->app->singleton(NormalizationService::class);

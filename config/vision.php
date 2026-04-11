@@ -7,16 +7,24 @@ return [
     'debug_mode' => env('VISION_DEBUG', false),
 
     /**
-     * Capture / POST scan : serpapi = package Node @driply/serpapi-outfit-search (Lens + Shopping SerpApi).
-     * legacy = pipeline PHP (GPT-4o Vision + services Vision).
+     * Capture / POST scan :
+     * - legacy (défaut) : SerpApi **Google Lens** sur l’URL de la photo, puis **Google Shopping** (plusieurs requêtes
+     *   dérivées des titres Lens) — **sans GPT / OpenAI**, **sans Node**.
+     * - serpapi : package Node @driply/serpapi-outfit-search (nécessite `node` + paquet npm).
      */
-    'scan_driver' => env('VISION_SCAN_DRIVER', 'serpapi'),
+    'scan_driver' => env('VISION_SCAN_DRIVER', 'legacy'),
 
     'limits' => [
         'max_items_per_scan' => 3,
-        'max_products_per_item' => (int) env('VISION_MAX_PRODUCTS_PER_ITEM', 10),
-        'max_raw_results' => 20,
+        'max_products_per_item' => (int) env('VISION_MAX_PRODUCTS_PER_ITEM', 15),
+        'max_raw_results' => (int) env('VISION_MAX_RAW_RESULTS', 30),
         'min_results_before_fallback' => 3,
+        /** Nombre de requêtes Shopping distinctes générées à partir des titres Lens (plus = plus de résultats, plus d’appels SerpApi). */
+        'max_shopping_queries_from_lens' => (int) env('VISION_MAX_SHOPPING_QUERIES', 5),
+        /** Plafond après dédoublonnage (avant scoring). */
+        'max_candidates_after_dedup' => (int) env('VISION_MAX_CANDIDATES_AFTER_DEDUP', 40),
+        /** Minimum d’offres renvoyées pour valider un scan (sinon erreur 422). */
+        'min_scan_results' => (int) env('VISION_MIN_SCAN_RESULTS', 10),
     ],
 
     'weights' => [
