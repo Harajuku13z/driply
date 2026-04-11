@@ -27,7 +27,7 @@ use App\Services\Vision\NormalizationService;
 use App\Services\Vision\OutfitSearchPipeline;
 use App\Services\Vision\QueryGenerationService;
 use App\Services\Vision\ScoringService;
-use Illuminate\Support\Facades\Gate;
+use App\Services\Vision\SerpApiOutfitSearchRunner;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -35,6 +35,7 @@ use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
@@ -66,6 +67,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(NormalizationService::class);
         $this->app->singleton(DeduplicationService::class);
         $this->app->singleton(ScoringService::class);
+        $this->app->singleton(SerpApiOutfitSearchRunner::class);
         $this->app->singleton(OutfitSearchPipeline::class);
     }
 

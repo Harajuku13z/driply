@@ -2,9 +2,13 @@
     "$schema": "https://www.schemastore.org/package.json",
     "private": true,
     "type": "module",
+    "dependencies": {
+        "@driply/serpapi-outfit-search": "file:../serpapi-outfit-search"
+    },
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "postinstall": "node scripts/build-serpapi-outfit-search.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
