@@ -10,7 +10,7 @@
     </p>
 
     @if (session('status'))
-        <p style="color: rgba(100, 220, 160, 0.95); font-size: 0.95rem; margin-bottom: 1.25rem;">
+        <p style="color: var(--success); font-size: 0.95rem; margin-bottom: 1.25rem;">
             {{ session('status') }}
         </p>
     @endif

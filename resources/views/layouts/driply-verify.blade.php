@@ -3,25 +3,32 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark">
+    <meta name="color-scheme" content="light">
     <title>{{ $pageTitle ?? 'Driply' }}</title>
     <style>
+        /* Aligné sur DriplyTheme.swift (Crème & Or) */
         :root {
-            --void: #0a0a0a;
-            --card: #14141a;
-            --stroke: rgba(255, 255, 255, 0.08);
-            --purple: #7b61ff;
-            --blue: #00c2ff;
-            --text: #ffffff;
-            --muted: rgba(255, 255, 255, 0.62);
-            --faint: rgba(255, 255, 255, 0.38);
+            --bg: #F5F0E8;
+            --bg-card: #EDE8DE;
+            --stroke: #DDD5C4;
+            --gold: #C9A96E;
+            --gold-deep: #8C6B3D;
+            --text: #2C2622;
+            --muted: #8C7B6B;
+            --faint: #6B5E52;
+            --btn: #2C2622;
+            --btn-text: #F5F0E8;
+            --err-bg: rgba(200, 90, 90, 0.12);
+            --err-border: rgba(180, 70, 70, 0.35);
+            --err-text: #a84848;
+            --success: #2d6b4a;
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
             min-height: 100vh;
             font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: var(--void);
+            background: var(--bg);
             color: var(--text);
             -webkit-font-smoothing: antialiased;
         }
@@ -29,10 +36,10 @@
             position: fixed;
             inset: 0;
             z-index: 0;
-            background: var(--void);
+            background: var(--bg);
             background-image:
-                radial-gradient(ellipse 80% 50% at 50% -20%, rgba(123, 97, 255, 0.22), transparent),
-                radial-gradient(ellipse 60% 40% at 100% 100%, rgba(0, 194, 255, 0.12), transparent);
+                radial-gradient(ellipse 90% 55% at 50% -15%, rgba(201, 169, 110, 0.18), transparent 55%),
+                radial-gradient(ellipse 70% 45% at 100% 100%, rgba(221, 213, 196, 0.6), transparent 50%);
             pointer-events: none;
         }
         .wrap {
@@ -48,18 +55,18 @@
         .card {
             width: 100%;
             max-width: 420px;
-            background: var(--card);
+            background: var(--bg-card);
             border: 1px solid var(--stroke);
             border-radius: 1rem;
             padding: 2rem 1.75rem;
-            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+            box-shadow: 0 16px 40px rgba(44, 38, 34, 0.08);
         }
         .wordmark {
             font-size: 1.5rem;
             font-weight: 800;
             letter-spacing: -0.03em;
             margin: 0 0 1.5rem;
-            background: linear-gradient(90deg, var(--purple) 0%, var(--blue) 100%);
+            background: linear-gradient(90deg, var(--gold) 0%, var(--gold-deep) 100%);
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
@@ -70,6 +77,7 @@
             line-height: 1.25;
             margin: 0 0 0.75rem;
             letter-spacing: -0.02em;
+            color: var(--text);
         }
         p {
             margin: 0 0 1rem;
@@ -87,12 +95,14 @@
             border-radius: 50%;
             margin-bottom: 1.25rem;
             font-size: 1.75rem;
-            background: rgba(123, 97, 255, 0.15);
-            border: 1px solid rgba(123, 97, 255, 0.35);
+            color: var(--gold-deep);
+            background: rgba(201, 169, 110, 0.18);
+            border: 1px solid rgba(201, 169, 110, 0.45);
         }
         .badge.err {
-            background: rgba(255, 80, 100, 0.12);
-            border-color: rgba(255, 80, 100, 0.35);
+            color: var(--err-text);
+            background: var(--err-bg);
+            border-color: var(--err-border);
         }
         .hint {
             margin-top: 1.25rem;
@@ -102,7 +112,7 @@
             color: var(--faint);
         }
         a.hint-link {
-            color: var(--blue);
+            color: var(--gold-deep);
             text-decoration: none;
             font-weight: 500;
         }
@@ -117,21 +127,20 @@
             text-align: center;
             font-size: 1rem;
             font-weight: 600;
-            color: #ffffff !important;
+            color: var(--btn-text) !important;
             text-decoration: none !important;
             border-radius: 0.75rem;
-            background-color: #7b61ff;
-            background-image: linear-gradient(90deg, #7b61ff 0%, #00c2ff 100%);
-            box-shadow: 0 8px 24px rgba(123, 97, 255, 0.35);
+            background-color: var(--btn);
+            box-shadow: 0 8px 20px rgba(44, 38, 34, 0.18);
             border: none;
             cursor: pointer;
             -webkit-tap-highlight-color: transparent;
         }
         .btn-open-app:hover {
-            filter: brightness(1.06);
+            filter: brightness(1.05);
         }
         .btn-open-app:active {
-            filter: brightness(0.95);
+            filter: brightness(0.96);
         }
         label {
             display: block;
@@ -147,16 +156,16 @@
             font-size: 1rem;
             border-radius: 0.6rem;
             border: 1px solid var(--stroke);
-            background: rgba(0, 0, 0, 0.25);
+            background: var(--bg);
             color: var(--text);
         }
         input:focus {
             outline: none;
-            border-color: rgba(123, 97, 255, 0.5);
-            box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.15);
+            border-color: rgba(201, 169, 110, 0.75);
+            box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.2);
         }
         .error-msg {
-            color: #ff7a8a;
+            color: var(--err-text);
             font-size: 0.85rem;
             margin-top: 0.35rem;
         }
