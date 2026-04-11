@@ -18,6 +18,7 @@ use App\Services\FastServerService;
 use App\Support\LensPublicImageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -185,9 +186,10 @@ class InspirationController extends Controller
         $title = null;
         $duration = null;
         $mediaType = MediaTypeEnum::Image;
+        $note = null;
 
         if ($fetch !== null) {
-            // FastServer a renvoyé un résultat : télécharger le média
+            // ── FastServer a renvoyé un résultat : télécharger le média ──
             $disk = 'public';
             $filename = 'imports/'.Str::uuid()->toString().($fetch['type'] === 'video' ? '.mp4' : '.jpg');
             $storedPath = $fastServer->downloadMedia($fetch['download_url'], $filename, $disk);
@@ -205,10 +207,33 @@ class InspirationController extends Controller
                 }
             }
         } else {
-            // ── Lien web normal : récupérer les métadonnées OG (titre + image) ──
+            // ── Lien web normal : récupérer métadonnées OG + prix + télécharger image ──
             $og = $this->fetchOpenGraphMeta($data['url']);
             $title = $og['title'];
-            $thumbUrl = $og['image'];
+
+            // Télécharger l'image OG en local (au lieu de garder l'URL externe)
+            if (! empty($og['image'])) {
+                try {
+                    $imgPath = 'imports/og-'.Str::uuid()->toString().'.jpg';
+                    $imgBin = Http::timeout(15)
+                        ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
+                        ->get($og['image'])->throw()->body();
+                    Storage::disk('public')->put($imgPath, $imgBin);
+                    $thumbUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($imgPath);
+                    $mediaUrl = $thumbUrl;
+                } catch (\Throwable) {
+                    // Fallback : garder l'URL externe
+                    $thumbUrl = $og['image'];
+                }
+            }
+
+            // Construire la note avec prix + lien source pour que l'iOS puisse parser
+            $noteParts = [];
+            if (! empty($og['price'])) {
+                $noteParts[] = 'Prix : '.$og['price'].' €';
+            }
+            $noteParts[] = $data['url'];
+            $note = implode("\n", $noteParts);
         }
 
         $inspiration = Inspiration::query()->create([
@@ -221,6 +246,7 @@ class InspirationController extends Controller
             'title' => $title ?: $this->hostFromUrl($data['url']),
             'duration_seconds' => $duration,
             'media_type' => $mediaType,
+            'note' => $note,
             'status' => InspirationStatusEnum::Processed,
         ]);
 
@@ -234,16 +260,16 @@ class InspirationController extends Controller
     }
 
     /**
-     * Récupère titre + image OG d'une page web (fallback quand FastServer ne supporte pas l'URL).
+     * Récupère titre + image OG + prix d'une page web.
      *
-     * @return array{title: string|null, image: string|null}
+     * @return array{title: string|null, image: string|null, price: string|null}
      */
     private function fetchOpenGraphMeta(string $url): array
     {
-        $result = ['title' => null, 'image' => null];
+        $result = ['title' => null, 'image' => null, 'price' => null];
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(10)
+            $response = Http::timeout(10)
                 ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
                 ->get($url);
 
@@ -253,25 +279,193 @@ class InspirationController extends Controller
 
             $html = $response->body();
 
-            // og:title
+            // ── og:title / <title> ──
             if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
+                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']/', $html, $m)) {
                 $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
             } elseif (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $html, $m)) {
                 $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
             }
 
-            // og:image
+            // ── og:image ──
             if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
-                $img = trim($m[1]);
+                $img = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+                if (filter_var($img, FILTER_VALIDATE_URL)) {
+                    $result['image'] = $img;
+                }
+            } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/', $html, $m)) {
+                $img = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
                 if (filter_var($img, FILTER_VALIDATE_URL)) {
                     $result['image'] = $img;
                 }
             }
+
+            // ── Prix : extraction multi-sources ──
+            $result['price'] = $this->extractPriceFromHtml($html);
         } catch (\Throwable) {
             // Silencieux : on crée l'inspiration même sans métadonnées
         }
 
         return $result;
+    }
+
+    /**
+     * Extrait un prix depuis le HTML d'une page produit.
+     * Ordre de priorité :
+     * 1. JSON-LD (schema.org Product / Offer)
+     * 2. Meta tags (product:price:amount, og:price:amount)
+     * 3. Attributs data courants (data-price, itemprop="price")
+     * 4. Regex sur patterns de prix visibles
+     */
+    private function extractPriceFromHtml(string $html): ?string
+    {
+        // ── 1. JSON-LD ──
+        if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si', $html, $ldMatches)) {
+            foreach ($ldMatches[1] as $ldRaw) {
+                $ld = json_decode(trim($ldRaw), true);
+                if (! is_array($ld)) {
+                    continue;
+                }
+                $price = $this->extractPriceFromJsonLd($ld);
+                if ($price !== null) {
+                    return $price;
+                }
+            }
+        }
+
+        // ── 2. Meta tags : product:price:amount / og:price:amount ──
+        $metaPricePatterns = [
+            'product:price:amount',
+            'og:price:amount',
+        ];
+        foreach ($metaPricePatterns as $prop) {
+            $escaped = preg_quote($prop, '/');
+            if (preg_match('/<meta[^>]+(?:property|name)=["\']'.$escaped.'["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)
+                || preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']'.$escaped.'["\']/', $html, $m)) {
+                $val = $this->sanitizePrice(trim($m[1]));
+                if ($val !== null) {
+                    return $val;
+                }
+            }
+        }
+
+        // ── 3. itemprop="price" ──
+        if (preg_match('/<[^>]+itemprop=["\']price["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)
+            || preg_match('/<[^>]+itemprop=["\']price["\'][^>]*>\s*([\d.,]+)/', $html, $m)) {
+            $val = $this->sanitizePrice(trim($m[1]));
+            if ($val !== null) {
+                return $val;
+            }
+        }
+
+        // ── 4. data-price attribut ──
+        if (preg_match('/data-price=["\']([^"\']+)["\']/', $html, $m)) {
+            $val = $this->sanitizePrice(trim($m[1]));
+            if ($val !== null) {
+                return $val;
+            }
+        }
+
+        // ── 5. Regex sur prix visibles (€ / EUR) ──
+        $pricePatterns = [
+            '/(\d{1,8}(?:[.,]\d{1,2})?)\s*€/',
+            '/€\s*(\d{1,8}(?:[.,]\d{1,2})?)/',
+            '/(\d{1,8}(?:[.,]\d{1,2})?)\s*EUR\b/i',
+            '/(\d{1,8}(?:\.\d{1,2})?)\s*\$/',
+            '/\$\s*(\d{1,8}(?:\.\d{1,2})?)/',
+        ];
+        foreach ($pricePatterns as $pattern) {
+            if (preg_match($pattern, $html, $m)) {
+                $val = $this->sanitizePrice($m[1]);
+                if ($val !== null) {
+                    return $val;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Parcourt récursivement le JSON-LD pour trouver un prix dans Product / Offer.
+     */
+    private function extractPriceFromJsonLd(array $ld): ?string
+    {
+        // Tableau de schemas
+        if (isset($ld[0]) && is_array($ld[0])) {
+            foreach ($ld as $item) {
+                if (is_array($item)) {
+                    $price = $this->extractPriceFromJsonLd($item);
+                    if ($price !== null) {
+                        return $price;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        $type = $ld['@type'] ?? '';
+        $types = is_array($type) ? $type : [$type];
+
+        // Offre directe
+        if (array_intersect($types, ['Offer', 'AggregateOffer'])) {
+            $p = $ld['price'] ?? $ld['lowPrice'] ?? $ld['highPrice'] ?? null;
+            if ($p !== null) {
+                return $this->sanitizePrice((string) $p);
+            }
+        }
+
+        // Product avec offers
+        if (array_intersect($types, ['Product', 'IndividualProduct', 'ProductModel'])) {
+            $offers = $ld['offers'] ?? null;
+            if (is_array($offers)) {
+                if (isset($offers['price']) || isset($offers['lowPrice'])) {
+                    $p = $offers['price'] ?? $offers['lowPrice'] ?? null;
+                    if ($p !== null) {
+                        return $this->sanitizePrice((string) $p);
+                    }
+                }
+                // Tableau d'offres
+                if (isset($offers[0]) && is_array($offers[0])) {
+                    $p = $offers[0]['price'] ?? $offers[0]['lowPrice'] ?? null;
+                    if ($p !== null) {
+                        return $this->sanitizePrice((string) $p);
+                    }
+                }
+            }
+        }
+
+        // @graph (schema.org imbriqué)
+        if (isset($ld['@graph']) && is_array($ld['@graph'])) {
+            foreach ($ld['@graph'] as $node) {
+                if (is_array($node)) {
+                    $price = $this->extractPriceFromJsonLd($node);
+                    if ($price !== null) {
+                        return $price;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Nettoie une chaîne prix : "29.99" / "29,99" / "29.99 EUR" → "29.99"
+     */
+    private function sanitizePrice(string $raw): ?string
+    {
+        $clean = preg_replace('/[^\d.,]/', '', $raw);
+        if ($clean === null || $clean === '') {
+            return null;
+        }
+        // Normaliser : virgule → point
+        $clean = str_replace(',', '.', $clean);
+        $val = (float) $clean;
+
+        return $val > 0 ? number_format($val, 2, '.', '') : null;
     }
 
     private function hostFromUrl(string $url): string
