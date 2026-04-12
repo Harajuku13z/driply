@@ -15,6 +15,7 @@ use App\Models\GroupeItem;
 use App\Models\Inspiration;
 use App\Models\User;
 use App\Services\FastServerService;
+use App\Services\LinkPreviewService;
 use App\Support\LensPublicImageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -223,36 +224,56 @@ class InspirationController extends Controller
                 }
             }
         } else {
-            // ── Lien web normal : récupérer métadonnées OG + prix + télécharger image ──
-            $og = $this->fetchOpenGraphMeta($data['url']);
-            $title = $og['title'];
+            // ── Lien web normal : scraping robuste via LinkPreviewService ──
+            $linkPreview = app(LinkPreviewService::class);
+            $preview = $linkPreview->preview($data['url']);
 
-            // Télécharger l'image OG en local
-            if (! empty($og['image'])) {
+            $title = $preview['title'];
+
+            // Télécharger l'image en local pour affichage fiable
+            $imageUrl = $preview['image'];
+            if (! empty($imageUrl)) {
                 try {
-                    $imgPath = 'imports/og-'.Str::uuid()->toString().'.jpg';
-                    $imgBin = Http::timeout(15)
-                        ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
-                        ->get($og['image'])->throw()->body();
-                    Storage::disk('public')->put($imgPath, $imgBin);
-                    $thumbUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($imgPath);
-                    $mediaUrl = $thumbUrl;
+                    $ext = Str::lower(pathinfo(parse_url($imageUrl, PHP_URL_PATH) ?: '', PATHINFO_EXTENSION));
+                    $ext = in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'], true) ? $ext : 'jpg';
+                    $imgPath = 'imports/og-'.Str::uuid()->toString().'.'.$ext;
+                    $imgBin = Http::timeout(20)
+                        ->withHeaders([
+                            'User-Agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                            'Accept' => 'image/*,*/*;q=0.8',
+                            'Referer' => $data['url'],
+                        ])
+                        ->get($imageUrl)->throw()->body();
+                    if (strlen($imgBin) > 500) {
+                        Storage::disk($disk)->put($imgPath, $imgBin);
+                        $thumbUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($imgPath);
+                        $mediaUrl = $thumbUrl;
+                    } else {
+                        $thumbUrl = $imageUrl;
+                    }
                 } catch (\Throwable) {
-                    $thumbUrl = $og['image'];
+                    $thumbUrl = $imageUrl;
                 }
             }
 
-            // Favicon de secours quand il n'y a pas d'image OG
+            // Favicon de secours quand aucune image n'a été trouvée
             if (empty($thumbUrl)) {
-                $faviconUrl = $this->fetchFaviconUrl($data['url']);
+                $faviconUrl = $preview['favicon'];
             }
 
-            // Note : prix (uniquement si données structurées fiables) + lien source
+            // Site name pour enrichir l'affichage
+            $siteName = $preview['site_name'];
+
+            // Note : prix (données structurées uniquement) + lien source
             $noteParts = [];
-            if (! empty($og['price'])) {
-                $noteParts[] = 'Prix : '.$og['price'].' €';
+            if (! empty($preview['price_amount']) && $preview['price_amount'] > 0) {
+                $currency = $preview['price_currency'] ?? 'EUR';
+                $noteParts[] = 'Prix : '.number_format($preview['price_amount'], 2, ',', '').' '.($currency === 'EUR' ? '€' : $currency);
             }
             $noteParts[] = $data['url'];
+            if (! empty($siteName)) {
+                $noteParts[] = 'Source : '.$siteName;
+            }
             $note = implode("\n", $noteParts);
         }
 
@@ -281,240 +302,13 @@ class InspirationController extends Controller
         return $this->created((new InspirationResource($inspiration))->resolve(), 'Import créé');
     }
 
-    /**
-     * Récupère titre + image OG + prix d'une page web.
-     *
-     * @return array{title: string|null, image: string|null, price: string|null}
-     */
-    private function fetchOpenGraphMeta(string $url): array
-    {
-        $result = ['title' => null, 'image' => null, 'price' => null];
-
-        try {
-            $response = Http::timeout(10)
-                ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
-                ->get($url);
-
-            if ($response->failed()) {
-                return $result;
-            }
-
-            $html = $response->body();
-
-            // ── og:title / <title> ──
-            if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
-                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-            } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']/', $html, $m)) {
-                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-            } elseif (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $html, $m)) {
-                $result['title'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-            }
-
-            // ── og:image ──
-            if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)) {
-                $img = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-                if (filter_var($img, FILTER_VALIDATE_URL)) {
-                    $result['image'] = $img;
-                }
-            } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/', $html, $m)) {
-                $img = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-                if (filter_var($img, FILTER_VALIDATE_URL)) {
-                    $result['image'] = $img;
-                }
-            }
-
-            // ── Prix : extraction multi-sources ──
-            $result['price'] = $this->extractPriceFromHtml($html);
-        } catch (\Throwable) {
-            // Silencieux : on crée l'inspiration même sans métadonnées
-        }
-
-        return $result;
-    }
-
-    /**
-     * Extrait un prix depuis le HTML d'une page produit.
-     * Ordre de priorité :
-     * 1. JSON-LD (schema.org Product / Offer)
-     * 2. Meta tags (product:price:amount, og:price:amount)
-     * 3. Attributs data courants (data-price, itemprop="price")
-     * 4. Regex sur patterns de prix visibles
-     */
-    private function extractPriceFromHtml(string $html): ?string
-    {
-        // ── 1. JSON-LD ──
-        if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si', $html, $ldMatches)) {
-            foreach ($ldMatches[1] as $ldRaw) {
-                $ld = json_decode(trim($ldRaw), true);
-                if (! is_array($ld)) {
-                    continue;
-                }
-                $price = $this->extractPriceFromJsonLd($ld);
-                if ($price !== null) {
-                    return $price;
-                }
-            }
-        }
-
-        // ── 2. Meta tags : product:price:amount / og:price:amount ──
-        $metaPricePatterns = [
-            'product:price:amount',
-            'og:price:amount',
-        ];
-        foreach ($metaPricePatterns as $prop) {
-            $escaped = preg_quote($prop, '/');
-            if (preg_match('/<meta[^>]+(?:property|name)=["\']'.$escaped.'["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)
-                || preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']'.$escaped.'["\']/', $html, $m)) {
-                $val = $this->sanitizePrice(trim($m[1]));
-                if ($val !== null) {
-                    return $val;
-                }
-            }
-        }
-
-        // ── 3. itemprop="price" ──
-        if (preg_match('/<[^>]+itemprop=["\']price["\'][^>]+content=["\']([^"\']+)["\']/', $html, $m)
-            || preg_match('/<[^>]+itemprop=["\']price["\'][^>]*>\s*([\d.,]+)/', $html, $m)) {
-            $val = $this->sanitizePrice(trim($m[1]));
-            if ($val !== null) {
-                return $val;
-            }
-        }
-
-        // Les étapes 4 (data-price) et 5 (regex visibles) sont volontairement omises :
-        // trop de faux positifs (prix de navigation, produits liés, etc.).
-        // Seules les données structurées (JSON-LD, meta tags, itemprop) sont fiables.
-
-        return null;
-    }
-
-    /**
-     * Parcourt récursivement le JSON-LD pour trouver un prix dans Product / Offer.
-     */
-    private function extractPriceFromJsonLd(array $ld): ?string
-    {
-        // Tableau de schemas
-        if (isset($ld[0]) && is_array($ld[0])) {
-            foreach ($ld as $item) {
-                if (is_array($item)) {
-                    $price = $this->extractPriceFromJsonLd($item);
-                    if ($price !== null) {
-                        return $price;
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        $type = $ld['@type'] ?? '';
-        $types = is_array($type) ? $type : [$type];
-
-        // Offre directe
-        if (array_intersect($types, ['Offer', 'AggregateOffer'])) {
-            $p = $ld['price'] ?? $ld['lowPrice'] ?? $ld['highPrice'] ?? null;
-            if ($p !== null) {
-                return $this->sanitizePrice((string) $p);
-            }
-        }
-
-        // Product avec offers
-        if (array_intersect($types, ['Product', 'IndividualProduct', 'ProductModel'])) {
-            $offers = $ld['offers'] ?? null;
-            if (is_array($offers)) {
-                if (isset($offers['price']) || isset($offers['lowPrice'])) {
-                    $p = $offers['price'] ?? $offers['lowPrice'] ?? null;
-                    if ($p !== null) {
-                        return $this->sanitizePrice((string) $p);
-                    }
-                }
-                // Tableau d'offres
-                if (isset($offers[0]) && is_array($offers[0])) {
-                    $p = $offers[0]['price'] ?? $offers[0]['lowPrice'] ?? null;
-                    if ($p !== null) {
-                        return $this->sanitizePrice((string) $p);
-                    }
-                }
-            }
-        }
-
-        // @graph (schema.org imbriqué)
-        if (isset($ld['@graph']) && is_array($ld['@graph'])) {
-            foreach ($ld['@graph'] as $node) {
-                if (is_array($node)) {
-                    $price = $this->extractPriceFromJsonLd($node);
-                    if ($price !== null) {
-                        return $price;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Nettoie une chaîne prix : "29.99" / "29,99" / "29.99 EUR" → "29.99"
-     */
-    private function sanitizePrice(string $raw): ?string
-    {
-        $clean = preg_replace('/[^\d.,]/', '', $raw);
-        if ($clean === null || $clean === '') {
-            return null;
-        }
-        // Normaliser : virgule → point
-        $clean = str_replace(',', '.', $clean);
-        $val = (float) $clean;
-
-        return $val > 0 ? number_format($val, 2, '.', '') : null;
-    }
+    // fetchOpenGraphMeta / extractPriceFromHtml : remplacés par LinkPreviewService
 
     private function hostFromUrl(string $url): string
     {
         $host = parse_url($url, PHP_URL_HOST);
 
         return is_string($host) ? $host : 'Lien partagé';
-    }
-
-    /**
-     * Tente de récupérer l'URL du favicon d'un site web.
-     * Ordre : <link rel="icon"> dans le HTML → /favicon.ico
-     */
-    private function fetchFaviconUrl(string $pageUrl): ?string
-    {
-        try {
-            $parsed = parse_url($pageUrl);
-            if (! isset($parsed['scheme'], $parsed['host'])) {
-                return null;
-            }
-            $origin = $parsed['scheme'].'://'.$parsed['host'];
-
-            // 1. Chercher dans le HTML
-            $html = Http::timeout(8)
-                ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
-                ->get($pageUrl)
-                ->body();
-
-            if (preg_match('/<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]+href=["\']([^"\']+)["\']/', $html, $m)
-                || preg_match('/<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\'](?:shortcut )?icon["\']/', $html, $m)) {
-                $href = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
-                if (str_starts_with($href, 'http')) {
-                    return $href;
-                }
-                // Relative URL
-                return $origin.'/'.ltrim($href, '/');
-            }
-
-            // 2. Fallback /favicon.ico
-            $faviconUrl = $origin.'/favicon.ico';
-            $resp = Http::timeout(8)->head($faviconUrl);
-            if ($resp->successful()) {
-                return $faviconUrl;
-            }
-        } catch (\Throwable) {
-        }
-
-        return null;
     }
 
     /**
