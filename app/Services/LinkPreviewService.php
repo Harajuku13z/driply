@@ -7,7 +7,9 @@ namespace App\Services;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Spatie\Browsershot\Browsershot;
 use Throwable;
 
 /**
@@ -114,6 +116,18 @@ class LinkPreviewService
             }
         }
 
+        // Fallback headless Chrome si HTTP classique échoue ou renvoie du HTML vide / protection JS
+        $needsHeadless = ($body === null || $body === '' || $this->looksLikeJsChallenge($body));
+
+        if ($needsHeadless) {
+            try {
+                $body = $this->fetchWithHeadlessChrome($url);
+                $finalUrl = $url;
+            } catch (Throwable $e) {
+                Log::channel('single')->warning('Browsershot fallback failed', ['url' => $url, 'error' => $e->getMessage()]);
+            }
+        }
+
         if ($body === null || $body === '') {
             $empty['error'] = 'Impossible de télécharger la page (toutes les tentatives ont échoué).';
 
@@ -142,6 +156,36 @@ class LinkPreviewService
         $title = $meta['title'] ?? null;
         $image = $meta['image'] ?? null;
 
+        // Si après HTTP on n'a toujours ni titre ni image, retenter avec headless Chrome
+        if (! $needsHeadless && ($title === null || $title === '') && ($image === null || $image === '')) {
+            try {
+                $chromBody = $this->fetchWithHeadlessChrome($url);
+                if ($chromBody !== null && $chromBody !== '') {
+                    if (strlen($chromBody) > self::MAX_BODY_BYTES) {
+                        $chromBody = substr($chromBody, 0, self::MAX_BODY_BYTES);
+                    }
+                    $meta = $this->parseHtmlMeta($chromBody, $finalUrl);
+                    $this->enrichFromJsonLd($chromBody, $finalUrl, $meta);
+                    $this->enrichImageFallbacks($chromBody, $finalUrl, $meta);
+                    $meta['favicon'] = $this->extractFavicon($chromBody, $finalUrl);
+                    $title = $meta['title'] ?? null;
+                    $image = $meta['image'] ?? null;
+                }
+            } catch (Throwable $e) {
+                Log::channel('single')->warning('Browsershot second-pass fallback failed', ['url' => $url, 'error' => $e->getMessage()]);
+            }
+        }
+
+        // Filtrer les titres qui sont en fait des messages d'erreur (sites protégés)
+        if ($title !== null && $this->titleIsErrorMessage($title)) {
+            $title = null;
+        }
+
+        // Si toujours pas de titre, utiliser le nom de domaine propre
+        if (($title === null || $title === '') && ($meta['site_name'] ?? null) !== null) {
+            $title = $meta['site_name'];
+        }
+
         return [
             'ok' => ($title !== null && $title !== '') || ($image !== null && $image !== ''),
             'title' => ($title !== null && $title !== '') ? $title : null,
@@ -154,6 +198,247 @@ class LinkPreviewService
             'favicon' => $meta['favicon'] ?? null,
             'error' => null,
         ];
+    }
+
+    // ─── Headless Chrome (Browsershot) ─────────────────────────────
+
+    private function titleIsErrorMessage(string $title): bool
+    {
+        $lower = Str::lower($title);
+
+        $errorSignals = [
+            'access denied',
+            'just a moment',
+            'checking your browser',
+            'attention required',
+            'please wait',
+            'error 403',
+            'error 404',
+            'blocked',
+            'captcha',
+            'verify you are human',
+            'we invite you to return',
+        ];
+
+        foreach ($errorSignals as $sig) {
+            if (str_contains($lower, $sig)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Détecte si le HTML ressemble à une page de protection JS (Cloudflare, Datadome, etc.).
+     */
+    private function looksLikeJsChallenge(string $body): bool
+    {
+        $lower = Str::lower($body);
+
+        // Pas de balise <head> ni de <title> = probablement une page vide / redirect JS
+        if (! str_contains($lower, '<head') && strlen($body) < 5000) {
+            return true;
+        }
+
+        $signals = [
+            'cf-browser-verification',
+            'cf_chl_opt',
+            'just a moment',
+            'checking your browser',
+            'enable javascript',
+            'please turn javascript on',
+            'challenge-platform',
+            'ray id:',
+            'ddos-guard',
+            'datadome',
+            'access denied',
+            'attention required',
+            'please wait while we verify',
+        ];
+
+        $hits = 0;
+        foreach ($signals as $sig) {
+            if (str_contains($lower, $sig)) {
+                $hits++;
+            }
+        }
+
+        return $hits >= 1;
+    }
+
+    /**
+     * Charge la page via headless Chrome (Puppeteer / Browsershot).
+     *
+     * Stratégie en 2 passes :
+     * 1. bodyHtml() avec domcontentloaded (rapide, suffit pour les sites SSR)
+     * 2. Si le HTML est creux (SPA), evaluate() JS pour extraire les meta tags rendus
+     *    et construire un HTML synthétique avec les infos récupérées
+     */
+    private function fetchWithHeadlessChrome(string $url): ?string
+    {
+        $chromePath = $this->detectChromePath();
+
+        $shot = Browsershot::url($url)
+            ->timeout(35)
+            ->setOption('args', [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--lang=fr-FR,fr',
+            ])
+            ->setOption('waitUntil', 'domcontentloaded')
+            ->userAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+            ->windowSize(1440, 900)
+            ->dismissDialogs()
+            ->setDelay(2000);
+
+        if ($chromePath !== null) {
+            $shot->setChromePath($chromePath);
+        }
+
+        // Passe 1 : récupérer le HTML brut
+        try {
+            $html = $shot->bodyHtml();
+        } catch (Throwable) {
+            $html = '';
+        }
+
+        // Vérifier si on a du contenu utile
+        $hasMeta = $html !== '' && (
+            str_contains($html, 'og:image')
+            || str_contains($html, 'og:title')
+            || str_contains($html, 'twitter:image')
+            || (str_contains($html, '<title') && ! str_contains(Str::lower($html), 'access denied'))
+        );
+
+        if ($html !== '' && strlen($html) > 500 && $hasMeta) {
+            Log::channel('single')->info('Browsershot HTML pass succeeded', ['url' => $url, 'len' => strlen($html)]);
+
+            return $html;
+        }
+
+        // Passe 2 : evaluate JS pour extraire les infos après rendu SPA
+        try {
+            $shot2 = Browsershot::url($url)
+                ->timeout(35)
+                ->setOption('args', ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
+                ->setOption('waitUntil', 'load')
+                ->userAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+                ->windowSize(1440, 900)
+                ->dismissDialogs()
+                ->setDelay(6000);
+
+            if ($chromePath !== null) {
+                $shot2->setChromePath($chromePath);
+            }
+
+            $js = <<<'JSEVAL'
+JSON.stringify({
+    title: document.title || '',
+    ogTitle: document.querySelector('meta[property="og:title"]')?.content || '',
+    ogImage: document.querySelector('meta[property="og:image"]')?.content || '',
+    ogDesc: document.querySelector('meta[property="og:description"]')?.content || '',
+    ogSite: document.querySelector('meta[property="og:site_name"]')?.content || '',
+    twImage: document.querySelector('meta[name="twitter:image"]')?.content || '',
+    twTitle: document.querySelector('meta[name="twitter:title"]')?.content || '',
+    desc: document.querySelector('meta[name="description"]')?.content || '',
+    h1: document.querySelector('h1')?.textContent?.trim() || '',
+    bigImgs: [...document.querySelectorAll('img')].filter(i => (i.naturalWidth > 150 || i.width > 150) && !i.src.startsWith('data:')).map(i => i.src).slice(0, 5),
+    jsonLd: [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent).slice(0, 3),
+    favicon: document.querySelector('link[rel="icon"]')?.href || document.querySelector('link[rel="shortcut icon"]')?.href || document.querySelector('link[rel*="apple-touch-icon"]')?.href || '',
+})
+JSEVAL;
+
+            $raw = $shot2->evaluate($js);
+            $data = json_decode($raw, true);
+
+            if (is_array($data)) {
+                Log::channel('single')->info('Browsershot JS evaluate succeeded', ['url' => $url, 'data_keys' => array_keys(array_filter($data))]);
+
+                return $this->buildSyntheticHtml($data, $url);
+            }
+        } catch (Throwable $e) {
+            Log::channel('single')->warning('Browsershot JS evaluate failed', ['url' => $url, 'error' => $e->getMessage()]);
+        }
+
+        // Retourner au moins le HTML brut si on en a
+        return $html !== '' && strlen($html) > 200 ? $html : null;
+    }
+
+    /**
+     * Construit un HTML synthétique à partir des données JS extraites par Browsershot.
+     * Permet au parser HTML standard de retrouver les meta tags normalement.
+     */
+    private function buildSyntheticHtml(array $data, string $url): string
+    {
+        $parts = ['<html><head>'];
+
+        $title = $data['ogTitle'] ?: $data['twTitle'] ?: $data['h1'] ?: $data['title'] ?: '';
+        if ($title !== '') {
+            $safe = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+            $parts[] = "<title>{$safe}</title>";
+            $parts[] = "<meta property=\"og:title\" content=\"{$safe}\">";
+        }
+
+        $image = $data['ogImage'] ?: $data['twImage'] ?: '';
+        if ($image === '' && ! empty($data['bigImgs'])) {
+            $image = $data['bigImgs'][0];
+        }
+        if ($image !== '') {
+            $safe = htmlspecialchars($image, ENT_QUOTES, 'UTF-8');
+            $parts[] = "<meta property=\"og:image\" content=\"{$safe}\">";
+        }
+
+        $desc = $data['ogDesc'] ?: $data['desc'] ?: '';
+        if ($desc !== '') {
+            $safe = htmlspecialchars($desc, ENT_QUOTES, 'UTF-8');
+            $parts[] = "<meta property=\"og:description\" content=\"{$safe}\">";
+            $parts[] = "<meta name=\"description\" content=\"{$safe}\">";
+        }
+
+        $site = $data['ogSite'] ?: '';
+        if ($site !== '') {
+            $safe = htmlspecialchars($site, ENT_QUOTES, 'UTF-8');
+            $parts[] = "<meta property=\"og:site_name\" content=\"{$safe}\">";
+        }
+
+        $favicon = $data['favicon'] ?: '';
+        if ($favicon !== '') {
+            $safe = htmlspecialchars($favicon, ENT_QUOTES, 'UTF-8');
+            $parts[] = "<link rel=\"icon\" href=\"{$safe}\">";
+        }
+
+        // Injecter les JSON-LD tels quels
+        foreach ($data['jsonLd'] ?? [] as $ld) {
+            if (is_string($ld) && $ld !== '') {
+                $parts[] = '<script type="application/ld+json">'.$ld.'</script>';
+            }
+        }
+
+        $parts[] = '</head><body></body></html>';
+
+        return implode("\n", $parts);
+    }
+
+    private function detectChromePath(): ?string
+    {
+        // macOS
+        $macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        if (file_exists($macPath)) {
+            return $macPath;
+        }
+
+        // Linux (production)
+        foreach (['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'] as $path) {
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        // Puppeteer bundled Chrome
+        return null;
     }
 
     // ─── Validation URL ──────────────────────────────────────────────
