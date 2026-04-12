@@ -198,8 +198,19 @@ class InspirationController extends Controller
             $storedPath = $fastServer->downloadMedia($fetch['download_url'], $filename, $disk);
             $mediaUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($storedPath);
             $mediaType = $fetch['type'] === 'video' ? MediaTypeEnum::Video : MediaTypeEnum::Image;
-            $title = $fetch['title'];
             $duration = $fetch['duration'];
+
+            // Caption → note (texte complet), title tronqué pour l'affichage
+            $rawCaption = $fetch['title'];
+            if ($rawCaption !== null && $rawCaption !== '') {
+                $note = $data['url']."\n\n".$rawCaption;
+                // Titre = première ligne ou premiers 120 caractères
+                $firstLine = Str::before($rawCaption, "\n");
+                $title = Str::limit(trim($firstLine), 120);
+            } else {
+                $title = $this->hostFromUrl($data['url']);
+                $note = $data['url'];
+            }
 
             if (! empty($fetch['thumbnail_url'])) {
                 try {
@@ -219,7 +230,6 @@ class InspirationController extends Controller
                     $storedExtra = $fastServer->downloadMedia($extraUrl, $extraPath, $disk);
                     $additionalImages[] = LensPublicImageUrl::absoluteFromPublicDiskPath($storedExtra);
                 } catch (\Throwable) {
-                    // Garder l'URL externe si le téléchargement échoue
                     $additionalImages[] = $extraUrl;
                 }
             }

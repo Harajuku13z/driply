@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Exceptions\ExternalServiceException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
@@ -98,6 +99,17 @@ class FastServerService
             throw new ExternalServiceException('Invalid FastSaverAPI response');
         }
 
+        // Log la réponse brute pour diagnostiquer les carrousels manquants
+        Log::channel('single')->info('FastSaverAPI raw response', [
+            'keys' => array_keys($json),
+            'type' => $json['type'] ?? null,
+            'has_urls_list' => isset($json['urls_list']),
+            'has_medias' => isset($json['medias']),
+            'has_images' => isset($json['images']),
+            'has_items' => isset($json['items']),
+            'raw_truncated' => json_encode($json, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR),
+        ]);
+
         if (($json['error'] ?? false) === true) {
             $msg = (string) ($json['message'] ?? $json['detail'] ?? 'FastSaverAPI error');
 
@@ -143,55 +155,103 @@ class FastServerService
     }
 
     /**
-     * Extrait les images supplémentaires d'un carrousel (Instagram, etc.).
-     * Parcourt les clés communes utilisées par FastSaverAPI et les custom fast servers.
+     * Extrait les images/vidéos supplémentaires d'un carrousel (Instagram, TikTok, etc.).
+     *
+     * Stratégie en 3 passes :
+     * 1. Chercher dans les clés connues (images, urls_list, medias, etc.)
+     * 2. Scan récursif de tout le JSON pour les tableaux d'objets avec URL
+     * 3. Scan récursif pour tout tableau de strings ressemblant à des URLs HTTP
      *
      * @return list<string>
      */
     private function extractAdditionalImages(array $json, string $primaryDownloadUrl): array
     {
         $candidates = [];
+        $seen = [$primaryDownloadUrl => true];
 
-        // Clés courantes renvoyées par différentes APIs de téléchargement social
-        $listKeys = ['images', 'media_urls', 'media_items', 'items', 'gallery', 'urls', 'slides', 'carousel_media'];
+        $addCandidate = function (string $url) use (&$candidates, &$seen): void {
+            $sanitized = $this->sanitizeUrlOptional($url);
+            if ($sanitized === null || isset($seen[$sanitized])) {
+                return;
+            }
+            $seen[$sanitized] = true;
+            $candidates[] = $sanitized;
+        };
+
+        // ── Passe 1 : clés connues au premier niveau ──
+        $listKeys = [
+            'urls_list', 'medias', 'images', 'media_urls', 'media_items', 'items',
+            'gallery', 'urls', 'slides', 'carousel_media', 'photos', 'pictures',
+            'resources', 'carousel', 'media', 'download_urls', 'video_urls',
+        ];
 
         foreach ($listKeys as $key) {
             $raw = $json[$key] ?? null;
             if (! is_array($raw) || empty($raw)) {
                 continue;
             }
-
-            foreach ($raw as $item) {
-                $url = null;
-
-                if (is_string($item)) {
-                    $url = $item;
-                } elseif (is_array($item)) {
-                    // Objet avec download_url / url / image_url / src / thumbnail
-                    foreach (['download_url', 'url', 'image_url', 'src', 'thumbnail_url', 'thumbnail'] as $field) {
-                        if (isset($item[$field]) && is_string($item[$field]) && $item[$field] !== '') {
-                            $url = $item[$field];
-                            break;
-                        }
-                    }
-                }
-
-                if ($url !== null) {
-                    $sanitized = $this->sanitizeUrlOptional($url);
-                    if ($sanitized !== null && $sanitized !== $primaryDownloadUrl) {
-                        $candidates[] = $sanitized;
-                    }
-                }
-            }
-
-            // Arrêter à la première clé qui a produit des résultats
-            if (! empty($candidates)) {
-                break;
-            }
+            $this->extractUrlsFromArray($raw, $addCandidate);
         }
 
-        // Dédupliquer en préservant l'ordre
-        return array_values(array_unique($candidates));
+        if (! empty($candidates)) {
+            return $candidates;
+        }
+
+        // ── Passe 2 : scan récursif de toutes les valeurs ──
+        $this->deepScanForUrls($json, $addCandidate, 0);
+
+        return $candidates;
+    }
+
+    /**
+     * Extrait des URLs depuis un tableau (strings directes ou objets avec clé url).
+     */
+    private function extractUrlsFromArray(array $items, callable $addCandidate): void
+    {
+        $urlFields = ['download_url', 'url', 'image_url', 'src', 'thumbnail_url',
+            'thumbnail', 'video_url', 'media_url', 'href', 'link', 'image'];
+
+        foreach ($items as $item) {
+            if (is_string($item) && $this->looksLikeMediaUrl($item)) {
+                $addCandidate($item);
+            } elseif (is_array($item)) {
+                foreach ($urlFields as $field) {
+                    if (isset($item[$field]) && is_string($item[$field]) && $this->looksLikeMediaUrl($item[$field])) {
+                        $addCandidate($item[$field]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Scan récursif : cherche des tableaux d'URLs ou d'objets contenant des URLs.
+     */
+    private function deepScanForUrls(array $data, callable $addCandidate, int $depth): void
+    {
+        if ($depth > 5) {
+            return;
+        }
+
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                // Si c'est un tableau séquentiel (liste), essayer d'en extraire des URLs
+                if (isset($value[0])) {
+                    $this->extractUrlsFromArray($value, $addCandidate);
+                }
+                $this->deepScanForUrls($value, $addCandidate, $depth + 1);
+            }
+        }
+    }
+
+    private function looksLikeMediaUrl(string $val): bool
+    {
+        $trimmed = trim($val);
+
+        return $trimmed !== ''
+            && (str_starts_with($trimmed, 'http://') || str_starts_with($trimmed, 'https://'))
+            && strlen($trimmed) > 20;
     }
 
     /**
