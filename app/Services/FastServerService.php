@@ -109,7 +109,7 @@ class FastServerService
 
     /**
      * @param  array<string, mixed>  $json
-     * @return array{download_url: string, thumbnail_url: string|null, title: string|null, duration: int|null, type: string}
+     * @return array{download_url: string, thumbnail_url: string|null, title: string|null, duration: int|null, type: string, additional_images: list<string>}
      */
     private function normalizeFetchPayload(array $json): array
     {
@@ -129,13 +129,69 @@ class FastServerService
             $type = 'video';
         }
 
+        // Carrousels Instagram / multi-images : chercher les clés communes selon les APIs
+        $additionalImages = $this->extractAdditionalImages($json, $downloadUrl);
+
         return [
             'download_url' => $downloadUrl,
             'thumbnail_url' => $thumb,
             'title' => $title,
             'duration' => $duration,
             'type' => $type,
+            'additional_images' => $additionalImages,
         ];
+    }
+
+    /**
+     * Extrait les images supplémentaires d'un carrousel (Instagram, etc.).
+     * Parcourt les clés communes utilisées par FastSaverAPI et les custom fast servers.
+     *
+     * @return list<string>
+     */
+    private function extractAdditionalImages(array $json, string $primaryDownloadUrl): array
+    {
+        $candidates = [];
+
+        // Clés courantes renvoyées par différentes APIs de téléchargement social
+        $listKeys = ['images', 'media_urls', 'media_items', 'items', 'gallery', 'urls', 'slides', 'carousel_media'];
+
+        foreach ($listKeys as $key) {
+            $raw = $json[$key] ?? null;
+            if (! is_array($raw) || empty($raw)) {
+                continue;
+            }
+
+            foreach ($raw as $item) {
+                $url = null;
+
+                if (is_string($item)) {
+                    $url = $item;
+                } elseif (is_array($item)) {
+                    // Objet avec download_url / url / image_url / src / thumbnail
+                    foreach (['download_url', 'url', 'image_url', 'src', 'thumbnail_url', 'thumbnail'] as $field) {
+                        if (isset($item[$field]) && is_string($item[$field]) && $item[$field] !== '') {
+                            $url = $item[$field];
+                            break;
+                        }
+                    }
+                }
+
+                if ($url !== null) {
+                    $sanitized = $this->sanitizeUrlOptional($url);
+                    if ($sanitized !== null && $sanitized !== $primaryDownloadUrl) {
+                        $candidates[] = $sanitized;
+                    }
+                }
+            }
+
+            // Arrêter à la première clé qui a produit des résultats
+            if (! empty($candidates)) {
+                break;
+            }
+        }
+
+        // Dédupliquer en préservant l'ordre
+        return array_values(array_unique($candidates));
     }
 
     /**

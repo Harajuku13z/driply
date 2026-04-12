@@ -183,14 +183,16 @@ class InspirationController extends Controller
 
         $mediaUrl = null;
         $thumbUrl = null;
+        $faviconUrl = null;
+        $additionalImages = [];
         $title = null;
         $duration = null;
         $mediaType = MediaTypeEnum::Image;
         $note = null;
+        $disk = 'public';
 
         if ($fetch !== null) {
-            // ── FastServer a renvoyé un résultat : télécharger le média ──
-            $disk = 'public';
+            // ── FastServer a renvoyé un résultat : télécharger le média principal ──
             $filename = 'imports/'.Str::uuid()->toString().($fetch['type'] === 'video' ? '.mp4' : '.jpg');
             $storedPath = $fastServer->downloadMedia($fetch['download_url'], $filename, $disk);
             $mediaUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($storedPath);
@@ -206,12 +208,26 @@ class InspirationController extends Controller
                     $thumbUrl = $fetch['thumbnail_url'];
                 }
             }
+
+            // ── Carrousel : télécharger les images supplémentaires (max 20) ──
+            foreach (array_slice($fetch['additional_images'] ?? [], 0, 20) as $extraUrl) {
+                try {
+                    $ext = Str::lower(pathinfo(parse_url($extraUrl, PHP_URL_PATH) ?: '', PATHINFO_EXTENSION));
+                    $ext = in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? $ext : 'jpg';
+                    $extraPath = 'imports/extra-'.Str::uuid()->toString().'.'.$ext;
+                    $storedExtra = $fastServer->downloadMedia($extraUrl, $extraPath, $disk);
+                    $additionalImages[] = LensPublicImageUrl::absoluteFromPublicDiskPath($storedExtra);
+                } catch (\Throwable) {
+                    // Garder l'URL externe si le téléchargement échoue
+                    $additionalImages[] = $extraUrl;
+                }
+            }
         } else {
             // ── Lien web normal : récupérer métadonnées OG + prix + télécharger image ──
             $og = $this->fetchOpenGraphMeta($data['url']);
             $title = $og['title'];
 
-            // Télécharger l'image OG en local (au lieu de garder l'URL externe)
+            // Télécharger l'image OG en local
             if (! empty($og['image'])) {
                 try {
                     $imgPath = 'imports/og-'.Str::uuid()->toString().'.jpg';
@@ -222,12 +238,16 @@ class InspirationController extends Controller
                     $thumbUrl = LensPublicImageUrl::absoluteFromPublicDiskPath($imgPath);
                     $mediaUrl = $thumbUrl;
                 } catch (\Throwable) {
-                    // Fallback : garder l'URL externe
                     $thumbUrl = $og['image'];
                 }
             }
 
-            // Construire la note avec prix + lien source pour que l'iOS puisse parser
+            // Favicon de secours quand il n'y a pas d'image OG
+            if (empty($thumbUrl)) {
+                $faviconUrl = $this->fetchFaviconUrl($data['url']);
+            }
+
+            // Note : prix (uniquement si données structurées fiables) + lien source
             $noteParts = [];
             if (! empty($og['price'])) {
                 $noteParts[] = 'Prix : '.$og['price'].' €';
@@ -243,6 +263,8 @@ class InspirationController extends Controller
             'platform' => $data['platform'],
             'media_url' => $mediaUrl,
             'thumbnail_url' => $thumbUrl,
+            'additional_images' => ! empty($additionalImages) ? $additionalImages : null,
+            'favicon_url' => $faviconUrl,
             'title' => $title ?: $this->hostFromUrl($data['url']),
             'duration_seconds' => $duration,
             'media_type' => $mediaType,
@@ -359,30 +381,9 @@ class InspirationController extends Controller
             }
         }
 
-        // ── 4. data-price attribut ──
-        if (preg_match('/data-price=["\']([^"\']+)["\']/', $html, $m)) {
-            $val = $this->sanitizePrice(trim($m[1]));
-            if ($val !== null) {
-                return $val;
-            }
-        }
-
-        // ── 5. Regex sur prix visibles (€ / EUR) ──
-        $pricePatterns = [
-            '/(\d{1,8}(?:[.,]\d{1,2})?)\s*€/',
-            '/€\s*(\d{1,8}(?:[.,]\d{1,2})?)/',
-            '/(\d{1,8}(?:[.,]\d{1,2})?)\s*EUR\b/i',
-            '/(\d{1,8}(?:\.\d{1,2})?)\s*\$/',
-            '/\$\s*(\d{1,8}(?:\.\d{1,2})?)/',
-        ];
-        foreach ($pricePatterns as $pattern) {
-            if (preg_match($pattern, $html, $m)) {
-                $val = $this->sanitizePrice($m[1]);
-                if ($val !== null) {
-                    return $val;
-                }
-            }
-        }
+        // Les étapes 4 (data-price) et 5 (regex visibles) sont volontairement omises :
+        // trop de faux positifs (prix de navigation, produits liés, etc.).
+        // Seules les données structurées (JSON-LD, meta tags, itemprop) sont fiables.
 
         return null;
     }
@@ -473,6 +474,47 @@ class InspirationController extends Controller
         $host = parse_url($url, PHP_URL_HOST);
 
         return is_string($host) ? $host : 'Lien partagé';
+    }
+
+    /**
+     * Tente de récupérer l'URL du favicon d'un site web.
+     * Ordre : <link rel="icon"> dans le HTML → /favicon.ico
+     */
+    private function fetchFaviconUrl(string $pageUrl): ?string
+    {
+        try {
+            $parsed = parse_url($pageUrl);
+            if (! isset($parsed['scheme'], $parsed['host'])) {
+                return null;
+            }
+            $origin = $parsed['scheme'].'://'.$parsed['host'];
+
+            // 1. Chercher dans le HTML
+            $html = Http::timeout(8)
+                ->withHeaders(['User-Agent' => 'Driply/1.0 (link-preview)'])
+                ->get($pageUrl)
+                ->body();
+
+            if (preg_match('/<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]+href=["\']([^"\']+)["\']/', $html, $m)
+                || preg_match('/<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\'](?:shortcut )?icon["\']/', $html, $m)) {
+                $href = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+                if (str_starts_with($href, 'http')) {
+                    return $href;
+                }
+                // Relative URL
+                return $origin.'/'.ltrim($href, '/');
+            }
+
+            // 2. Fallback /favicon.ico
+            $faviconUrl = $origin.'/favicon.ico';
+            $resp = Http::timeout(8)->head($faviconUrl);
+            if ($resp->successful()) {
+                return $faviconUrl;
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
     }
 
     /**

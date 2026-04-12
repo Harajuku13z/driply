@@ -54,6 +54,10 @@ class InspirationResource extends JsonResource
             $base['media_url'] = $this->media_url;
             $base['media_type'] = $this->media_type?->value;
             $base['duration_seconds'] = $this->duration_seconds;
+            // Images supplémentaires (carrousel) — tableau vide si absent
+            $base['additional_images'] = $this->additional_images ?? [];
+            // Favicon de secours quand thumbnail_url et media_url sont vides
+            $base['favicon_url'] = $this->favicon_url;
         }
 
         return $base;
