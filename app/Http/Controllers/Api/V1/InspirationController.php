@@ -221,6 +221,11 @@ class InspirationController extends Controller
                 }
             }
 
+            // Garantir une thumbnail : si pas de thumb mais media est une image, réutiliser
+            if (empty($thumbUrl) && $mediaType === MediaTypeEnum::Image && ! empty($mediaUrl)) {
+                $thumbUrl = $mediaUrl;
+            }
+
             // ── Carrousel : télécharger les images supplémentaires (max 20) ──
             foreach (array_slice($fetch['additional_images'] ?? [], 0, 20) as $extraUrl) {
                 try {
